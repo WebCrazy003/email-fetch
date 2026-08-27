@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Eye, ListFilter, Play, Plus } from 'lucide-react';
+import { Copy, Eye, ListFilter, Pencil, Play, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { Empty, ErrorBox, Loading, PageHeader, StatusBadge } from '../components.js';
@@ -46,7 +46,9 @@ export function FiltersPage() {
           <td>{filter.latest_job_status ? <StatusBadge status={filter.latest_job_status} /> : <StatusBadge status="ready" />}</td>
           <td>{filter.run_count}</td><td>{users.toLocaleString()}</td><td>{emails.toLocaleString()}</td>
           <td>{filter.latest_job_created_at ? new Date(filter.latest_job_created_at).toLocaleString() : 'Never'}</td>
-          <td><div className="actions"><button className="button primary" disabled={isActive || (run.isPending && run.variables === filter.id)} onClick={() => run.mutate(filter.id)}><Play size={14} />{isActive ? 'Running' : run.isPending && run.variables === filter.id ? 'Starting…' : 'Run'}</button>
+          <td><div className="actions"><Link className="button" to={`/filters/${filter.id}/edit`}><Pencil size={14} />Edit</Link>
+            <Link className="button" to={`/filters/${filter.id}/duplicate`}><Copy size={14} />Duplicate</Link>
+            <button className="button primary" disabled={isActive || (run.isPending && run.variables === filter.id)} onClick={() => run.mutate(filter.id)}><Play size={14} />{isActive ? 'Running' : run.isPending && run.variables === filter.id ? 'Starting…' : 'Run'}</button>
             {filter.latest_job_id && <Link className="button" to={`/jobs/${filter.latest_job_id}`}><Eye size={14} />Job</Link>}
             {filter.latest_job_id && !isActive && <Link className="button" to={`/users?jobId=${filter.latest_job_id}`}>Results</Link>}</div></td></tr>;
       })}</tbody></table></div>

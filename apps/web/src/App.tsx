@@ -1,7 +1,7 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { Activity, Database, Github, LayoutDashboard, ListFilter, Mail, Settings, Users } from 'lucide-react';
 import { Dashboard } from './pages/Dashboard.js';
-import { NewFilter } from './pages/NewCollection.js';
+import { DuplicateFilter, EditFilter, NewFilter } from './pages/NewCollection.js';
 import { FiltersPage } from './pages/Filters.js';
 import { Jobs, JobDetail } from './pages/Jobs.js';
 import { UsersPage } from './pages/Users.js';
@@ -25,6 +25,8 @@ export function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/filters" element={<FiltersPage />} />
         <Route path="/filters/new" element={<NewFilter />} />
+        <Route path="/filters/:id/edit" element={<EditFilter />} />
+        <Route path="/filters/:id/duplicate" element={<DuplicateFilter />} />
         <Route path="/jobs" element={<Jobs />} />
         <Route path="/jobs/:id" element={<JobDetail />} />
         <Route path="/users" element={<UsersPage />} />

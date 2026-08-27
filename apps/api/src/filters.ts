@@ -1,4 +1,4 @@
-import { Body, ConflictException, Controller, Get, Injectable, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, ConflictException, Controller, Get, Injectable, NotFoundException, Param, Patch, Post } from '@nestjs/common';
 import { createFilterSchema, type CollectionFilters, type CreateFilterInput } from '@email-fetch/shared';
 import { Database } from './database.js';
 import { parseWith } from './http.js';
@@ -8,6 +8,7 @@ type FilterRow = {
   id: string;
   name: string;
   source_id: string;
+  source_key: string;
   adapter_version: string;
   filters_json: CollectionFilters;
 };
@@ -58,13 +59,28 @@ export class FiltersService {
 
   async get(id: string): Promise<FilterRow> {
     const result = await this.db.query<FilterRow>(
-      `SELECT f.id, f.name, f.source_id, f.filters_json, s.adapter_version
+      `SELECT f.id, f.name, f.source_id, f.filters_json, s.source_key, s.adapter_version
        FROM saved_filters f JOIN sources s ON s.id = f.source_id
        WHERE f.id = $1`,
       [id]
     );
     if (!result.rows[0]) throw new NotFoundException('Filter not found');
     return result.rows[0];
+  }
+
+  async update(id: string, input: CreateFilterInput) {
+    const source = await this.db.query<{ id: string }>(
+      `SELECT id FROM sources WHERE source_key = $1 AND enabled = true`,
+      [input.source]
+    );
+    if (!source.rows[0]) throw new NotFoundException('GitHub source is not enabled');
+    const result = await this.db.query<{ id: string }>(
+      `UPDATE saved_filters SET name = $2, source_id = $3, filters_json = $4::jsonb, updated_at = now()
+       WHERE id = $1 RETURNING id`,
+      [id, input.name, source.rows[0].id, JSON.stringify(input.filters)]
+    );
+    if (!result.rows[0]) throw new NotFoundException('Filter not found');
+    return this.get(id);
   }
 
   async run(id: string) {
@@ -87,6 +103,14 @@ export class FiltersController {
 
   @Post()
   create(@Body() body: unknown) { return this.filters.create(parseWith(createFilterSchema, body)); }
+
+  @Get(':id')
+  get(@Param('id') id: string) { return this.filters.get(id); }
+
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() body: unknown) {
+    return this.filters.update(id, parseWith(createFilterSchema, body));
+  }
 
   @Post(':id/run')
   run(@Param('id') id: string) { return this.filters.run(id); }
