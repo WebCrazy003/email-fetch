@@ -1,9 +1,7 @@
-import { Body, Controller, Get, Injectable, MessageEvent, NotFoundException, Param, Post, Query, Sse } from '@nestjs/common';
-import { createJobSchema, emptyJobCounters, type CreateJobInput } from '@email-fetch/shared';
+import { Controller, Get, Injectable, MessageEvent, NotFoundException, Param, Post, Query, Sse } from '@nestjs/common';
+import { emptyJobCounters, type CollectionFilters } from '@email-fetch/shared';
 import { concatMap, from, interval, map, Observable, startWith } from 'rxjs';
 import { Database } from './database.js';
-import { HistoryService } from './history.service.js';
-import { parseWith } from './http.js';
 import { QueueService } from './queue.service.js';
 import { buildGitHubQuery } from './github-adapter.js';
 
@@ -11,26 +9,20 @@ import { buildGitHubQuery } from './github-adapter.js';
 export class JobsService {
   constructor(
     private readonly db: Database,
-    private readonly queue: QueueService,
-    private readonly history: HistoryService
+    private readonly queue: QueueService
   ) {}
 
-  async create(input: CreateJobInput) {
-    const source = await this.db.query<{ id: string; adapter_version: string }>(
-      `SELECT id, adapter_version FROM sources WHERE source_key = 'github' AND enabled = true`
-    );
-    if (!source.rows[0]) throw new NotFoundException('GitHub source is not enabled');
+  async createForFilter(filter: { id: string; name: string; source_id: string; adapter_version: string; filters_json: CollectionFilters }) {
     const row = await this.db.query<{ id: string }>(
       `INSERT INTO collection_jobs
-        (name, source_id, source_adapter_version, status, filters_json, adapter_query_json, counters_json)
-       VALUES ($1, $2, $3, 'queued', $4::jsonb, $5::jsonb, $6::jsonb)
+        (name, source_id, source_adapter_version, saved_filter_id, status, filters_json, adapter_query_json, counters_json)
+       VALUES ($1, $2, $3, $4, 'queued', $5::jsonb, $6::jsonb, $7::jsonb)
        RETURNING id`,
-      [input.name ?? null, source.rows[0].id, source.rows[0].adapter_version, JSON.stringify(input.filters),
-        JSON.stringify({ query: buildGitHubQuery(input.filters), partitionStrategy: 'created_range' }), JSON.stringify(emptyJobCounters())]
+      [filter.name, filter.source_id, filter.adapter_version, filter.id, JSON.stringify(filter.filters_json),
+        JSON.stringify({ query: buildGitHubQuery(filter.filters_json), partitionStrategy: 'created_range' }), JSON.stringify(emptyJobCounters())]
     );
     const jobId = row.rows[0]!.id;
-    await this.event(jobId, 'info', 'job_created', 'Collection job created', { filters: input.filters });
-    await this.history.record('new_collection', input.filters, {}, undefined, jobId);
+    await this.event(jobId, 'info', 'job_created', 'Job created from saved filter', { filterId: filter.id, filters: filter.filters_json });
     await this.queue.enqueue(jobId);
     return this.get(jobId);
   }
@@ -60,7 +52,7 @@ export class JobsService {
        FROM collection_jobs j JOIN sources s ON s.id = j.source_id WHERE j.id = $1`,
       [id]
     );
-    if (!result.rows[0]) throw new NotFoundException('Collection job not found');
+    if (!result.rows[0]) throw new NotFoundException('Job not found');
     return result.rows[0];
   }
 
@@ -87,11 +79,6 @@ export class JobsService {
 @Controller('jobs')
 export class JobsController {
   constructor(private readonly jobs: JobsService) {}
-
-  @Post()
-  create(@Body() body: unknown) {
-    return this.jobs.create(parseWith(createJobSchema, body));
-  }
 
   @Get()
   list(@Query('page') page?: string, @Query('pageSize') pageSize?: string) {

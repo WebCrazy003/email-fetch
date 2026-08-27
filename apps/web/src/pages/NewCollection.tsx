@@ -1,10 +1,10 @@
 import { useMutation } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { Github, Info, Play, Sparkles } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Github, Info, Save, Sparkles } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { ErrorBox, PageHeader } from '../components.js';
-import type { Job } from '../types.js';
+import type { SavedFilter } from '../types.js';
 
 type FormState = {
   name: string; location: string; language: string; followersMin: string; followersMax: string;
@@ -20,12 +20,10 @@ const initial: FormState = { name: '', location: '', language: '', followersMin:
 
 function cleanNumber(value: string) { return value === '' ? undefined : Number(value); }
 
-export function NewCollection() {
-  const location = useLocation();
-  const saved = (location.state as { filters?: Partial<FormState> } | null)?.filters;
-  const [form, setForm] = useState<FormState>({ ...initial, ...saved });
+export function NewFilter() {
+  const [form, setForm] = useState<FormState>(initial);
   const navigate = useNavigate();
-  const mutation = useMutation({ mutationFn: (body: unknown) => api<Job>('/jobs', { method: 'POST', body: JSON.stringify(body) }), onSuccess: (job) => navigate(`/jobs/${job.id}`) });
+  const mutation = useMutation({ mutationFn: (body: unknown) => api<SavedFilter>('/filters', { method: 'POST', body: JSON.stringify(body) }), onSuccess: () => navigate('/filters') });
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((current) => ({ ...current, [key]: value }));
   const preview = useMemo(() => {
     const parts = ['Personal GitHub users'];
@@ -37,8 +35,7 @@ export function NewCollection() {
   }, [form]);
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (Number(form.maxUsers) > 5_000 && !window.confirm(`Inspect up to ${Number(form.maxUsers).toLocaleString()} profiles? This may take a long time and consume substantial GitHub API quota.`)) return;
-    mutation.mutate({ name: form.name || undefined, source: 'github', filters: {
+    mutation.mutate({ name: form.name, source: 'github', filters: {
       location: form.location || undefined, language: form.language || undefined,
       followersMin: cleanNumber(form.followersMin), followersMax: cleanNumber(form.followersMax),
       repositoriesMin: cleanNumber(form.repositoriesMin), repositoriesMax: cleanNumber(form.repositoriesMax),
@@ -50,10 +47,10 @@ export function NewCollection() {
     }});
   };
   return <>
-    <PageHeader eyebrow="GitHub collector" title="New collection" description="Define who to find. The job runs safely in the background." />
+    <PageHeader eyebrow="Saved GitHub search" title="New filter" description="Define and save who you want to find. You can run this filter from the filter list." />
     <form className="form-layout" onSubmit={submit}><div className="form-main">
-      <section className="panel form-section"><div className="section-title"><span>01</span><div><h2>Collection</h2><p>Name and audience</p></div></div>
-        <label className="field full"><span>Job name <small>Optional</small></span><input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Warsaw TypeScript developers" /></label>
+      <section className="panel form-section"><div className="section-title"><span>01</span><div><h2>Filter</h2><p>Name and source</p></div></div>
+        <label className="field full"><span>Filter name</span><input required maxLength={120} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Warsaw TypeScript developers" /></label>
         <div className="source-card"><div className="github-tile"><Github /></div><div><strong>GitHub</strong><span>Personal users only · Official API</span></div><span className="connected">Enabled</span></div>
       </section>
       <section className="panel form-section"><div className="section-title"><span>02</span><div><h2>Profile filters</h2><p>GitHub-native discovery filters</p></div></div>
@@ -75,10 +72,10 @@ export function NewCollection() {
           <label className="check"><input type="checkbox" checked={form.requirePublicEmail} onChange={(e) => set('requirePublicEmail', e.target.checked)} /><div><strong>Require a publicly declared email</strong><span>Guesses will not satisfy this filter</span></div></label>
           <label className="check"><input type="checkbox" checked={form.excludePreviouslyProcessed} onChange={(e) => set('excludePreviouslyProcessed', e.target.checked)} /><div><strong>Exclude processed users</strong><span>Skip accounts already in the database</span></div></label></div>
       </section>
-    </div><aside className="form-side"><section className="panel sticky-card"><div className="summary-icon"><Sparkles size={18} /></div><h2>Ready to collect</h2><p>{preview}</p>
+    </div><aside className="form-side"><section className="panel sticky-card"><div className="summary-icon"><Sparkles size={18} /></div><h2>Ready to save</h2><p>{preview}</p>
       <label className="field"><span>Maximum profiles</span><input type="number" required min="1" max="10000" value={form.maxUsers} onChange={(e) => set('maxUsers', e.target.value)} /></label>
-      <div className="limit-note"><Info size={15} /> Maximum 10,000 per job. Broad searches are partitioned automatically.</div>
-      {mutation.error && <ErrorBox error={mutation.error} />}<button className="button primary wide" disabled={mutation.isPending}><Play size={16} />{mutation.isPending ? 'Starting…' : 'Start collection'}</button>
+      <div className="limit-note"><Info size={15} /> Maximum 10,000 profiles per run. Saving does not start a job.</div>
+      {mutation.error && <ErrorBox error={mutation.error} />}<button className="button primary wide" disabled={mutation.isPending}><Save size={16} />{mutation.isPending ? 'Saving…' : 'Save filter'}</button>
     </section></aside></form>
   </>;
 }

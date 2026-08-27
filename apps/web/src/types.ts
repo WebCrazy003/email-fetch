@@ -11,7 +11,13 @@ export interface UserRecord {
   emails: Array<{ email: string; originalEmail: string; status: string; confidence: string; discoveryType: string; successfulSendCount: number; lastSentAt?: string }>;
 }
 export interface Job {
-  id: string; name?: string; status: string; phase: string; source_key: string; filters_json: Record<string, unknown>;
+  id: string; name?: string; saved_filter_id?: string; status: string; phase: string; source_key: string; filters_json: Record<string, unknown>;
   counters_json: Record<string, number>; checkpoint_json: Record<string, unknown>; created_at: string; started_at?: string;
   completed_at?: string; failure_message?: string; recent_events?: Array<{ id: number; level: string; event_type: string; message: string; created_at: string }>;
+}
+export interface SavedFilter {
+  id: string; name: string; source_key: string; filters_json: Record<string, unknown>; run_count: number;
+  created_at: string; updated_at: string; latest_job_id?: string; latest_job_status?: string; latest_job_phase?: string;
+  latest_job_created_at?: string; latest_job_completed_at?: string; latest_failure_message?: string;
+  latest_counters_json?: Record<string, number>;
 }

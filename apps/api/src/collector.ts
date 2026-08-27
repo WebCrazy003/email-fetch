@@ -55,7 +55,7 @@ export class Collector {
     this.counters = { ...emptyJobCounters(), ...(job.counters_json ?? {}) };
     if (['completed', 'cancelled'].includes(job.status)) return;
     await this.updateJob('running', 'discovering', { started_at: 'COALESCE(started_at, now())' });
-    await this.event('info', 'job_started', 'Collection worker started');
+    await this.event('info', 'job_started', 'Job started');
     try {
       for await (const candidate of this.github.discover(job.filters_json)) {
         const state = await this.waitForRunnableState();
@@ -182,7 +182,7 @@ export class Collector {
           completed_at = now(), updated_at = now() WHERE id = $1`,
         [jobId, finalStatus, JSON.stringify(this.counters)]
       );
-      await this.event('info', 'job_completed', `Collection ${finalStatus.replaceAll('_', ' ')}`, this.counters);
+      await this.event('info', 'job_completed', `Job ${finalStatus.replaceAll('_', ' ')}`, this.counters);
     } catch (error) {
       this.counters.errors += 1;
       await this.db.query(
@@ -190,14 +190,14 @@ export class Collector {
           completed_at = now(), updated_at = now(), failure_code = $3, failure_message = $4 WHERE id = $1`,
         [jobId, JSON.stringify(this.counters), error instanceof GitHubRateLimitError ? 'github_rate_limit' : 'collector_error', safeError(error)]
       );
-      await this.event('error', 'job_failed', 'Collection job failed', { reason: safeError(error) });
+      await this.event('error', 'job_failed', 'Job failed', { reason: safeError(error) });
       throw error;
     }
   }
 
   private async loadJob(): Promise<JobRow> {
     const result = await this.db.query<JobRow>(`SELECT id, status, filters_json, counters_json FROM collection_jobs WHERE id = $1`, [this.jobId]);
-    if (!result.rows[0]) throw new Error('Collection job not found');
+    if (!result.rows[0]) throw new Error('Job not found');
     return result.rows[0];
   }
 
@@ -206,7 +206,7 @@ export class Collector {
       const job = await this.loadJob();
       if (job.status === 'cancelling' || job.status === 'cancelled') {
         await this.db.query(`UPDATE collection_jobs SET status = 'cancelled', phase = 'cancelled', completed_at = now(), updated_at = now() WHERE id = $1`, [this.jobId]);
-        await this.event('info', 'job_cancelled', 'Collection job cancelled');
+        await this.event('info', 'job_cancelled', 'Job cancelled');
         return 'cancelled';
       }
       if (job.status !== 'paused') return 'running';
@@ -250,7 +250,7 @@ export class Collector {
   private async checkpoint(login: string) {
     await this.db.query(
       `UPDATE collection_jobs SET counters_json = $2::jsonb,
-        checkpoint_json = jsonb_build_object('lastLogin', $3, 'processed', $4), updated_at = now() WHERE id = $1`,
+        checkpoint_json = jsonb_build_object('lastLogin', $3::text, 'processed', $4::integer), updated_at = now() WHERE id = $1`,
       [this.jobId, JSON.stringify(this.counters), login, this.counters.usersInspected + this.counters.skipped + this.counters.suppressed]
     );
   }

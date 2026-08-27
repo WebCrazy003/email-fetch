@@ -191,6 +191,28 @@ CREATE TABLE IF NOT EXISTS search_executions (
   executed_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS saved_filters (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  source_id uuid NOT NULL REFERENCES sources(id),
+  filters_json jsonb NOT NULL,
+  legacy_search_history_id uuid UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE collection_jobs ADD COLUMN IF NOT EXISTS saved_filter_id uuid;
+
+DO $migration$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'collection_jobs_saved_filter_fk') THEN
+    ALTER TABLE collection_jobs
+      ADD CONSTRAINT collection_jobs_saved_filter_fk
+      FOREIGN KEY (saved_filter_id) REFERENCES saved_filters(id) ON DELETE SET NULL;
+  END IF;
+END
+$migration$;
+
 CREATE TABLE IF NOT EXISTS suppressions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   suppression_type text NOT NULL CHECK (suppression_type IN ('email', 'domain', 'source_account_id', 'source_username')),
@@ -229,6 +251,8 @@ CREATE INDEX IF NOT EXISTS job_events_job_created_idx ON job_events(job_id, crea
 CREATE INDEX IF NOT EXISTS search_history_context_last_idx ON search_history(context, last_executed_at DESC);
 CREATE INDEX IF NOT EXISTS search_executions_history_idx ON search_executions(search_history_id, executed_at DESC);
 CREATE INDEX IF NOT EXISTS search_executions_job_idx ON search_executions(collection_job_id) WHERE collection_job_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS saved_filters_updated_idx ON saved_filters(updated_at DESC);
+CREATE INDEX IF NOT EXISTS collection_jobs_saved_filter_idx ON collection_jobs(saved_filter_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS suppressions_identity_idx
   ON suppressions(suppression_type, COALESCE(source_id, '00000000-0000-0000-0000-000000000000'::uuid), normalized_value);
 

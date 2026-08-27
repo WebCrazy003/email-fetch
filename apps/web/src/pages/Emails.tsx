@@ -11,7 +11,7 @@ export function EmailsPage() {
   const page = Number(params.get('page') ?? 1); const q = params.get('q') ?? ''; const domain = params.get('domain') ?? '';
   const status = params.get('status') ?? ''; const confidence = params.get('confidence') ?? '';
   const discoveryType = params.get('discoveryType') ?? ''; const sendStatus = params.get('sendStatus') ?? '';
-  const url = useMemo(() => `/emails?${queryString({ q, domain, status, confidence, discoveryType, sendStatus, page, pageSize: 25, recordHistory: page === 1 })}`,
+  const url = useMemo(() => `/emails?${queryString({ q, domain, status, confidence, discoveryType, sendStatus, page, pageSize: 25 })}`,
     [q, domain, status, confidence, discoveryType, sendStatus, page]);
   const query = useQuery({ queryKey: ['emails', url], queryFn: () => api<Page<EmailRecord>>(url) });
   const patch = (key: string, value: string) => { const next = new URLSearchParams(params); value ? next.set(key, value) : next.delete(key); if (key !== 'page') next.set('page', '1'); setParams(next); };

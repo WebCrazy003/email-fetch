@@ -1,6 +1,6 @@
 # Email Fetch
 
-A local, single-operator application for finding personal GitHub users, collecting public contact details from approved sources, reviewing email confidence, and managing the resulting records. The React interface is backed by a NestJS API, a BullMQ worker, PostgreSQL, and Redis.
+A local, single-operator application for saving GitHub user filters, running them as background jobs, gathering public contact details from approved sources, reviewing email confidence, and managing the resulting records. The React interface is backed by a NestJS API, a BullMQ worker, PostgreSQL, and Redis.
 
 The MVP has no application login, bulk export, or automatic retention expiry. It only uses the GitHub API, public email on a GitHub profile, and up to five pages on the website explicitly linked from that profile. Guessed addresses are visibly marked as unsure.
 

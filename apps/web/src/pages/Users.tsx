@@ -12,10 +12,10 @@ export function UsersPage() {
   const q = params.get('q') ?? ''; const location = params.get('location') ?? ''; const company = params.get('company') ?? '';
   const confidence = params.get('confidence') ?? ''; const discoveryType = params.get('discoveryType') ?? '';
   const emailStatus = params.get('emailStatus') ?? ''; const sendStatus = params.get('sendStatus') ?? '';
-  const suppressed = params.get('suppressed') ?? '';
+  const suppressed = params.get('suppressed') ?? ''; const jobId = params.get('jobId') ?? '';
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const url = useMemo(() => `/users?${queryString({ q, location, company, confidence, discoveryType, emailStatus, sendStatus, suppressed, page, pageSize: 25, recordHistory: page === 1 })}`,
-    [q, location, company, confidence, discoveryType, emailStatus, sendStatus, suppressed, page]);
+  const url = useMemo(() => `/users?${queryString({ q, location, company, confidence, discoveryType, emailStatus, sendStatus, suppressed, jobId, page, pageSize: 25 })}`,
+    [q, location, company, confidence, discoveryType, emailStatus, sendStatus, suppressed, jobId, page]);
   const query = useQuery({ queryKey: ['users', url], queryFn: () => api<Page<UserRecord>>(url) });
   const patch = (key: string, value: string) => { const next = new URLSearchParams(params); value ? next.set(key, value) : next.delete(key); if (key !== 'page') next.set('page', '1'); setParams(next); };
   if (query.isLoading) return <Loading />;
@@ -41,7 +41,7 @@ export function UsersPage() {
         <td><div className="email-stack">{user.emails.length ? user.emails.map((email) => <div key={email.email}><Mail size={13} /><span>{email.email}</span><StatusBadge status={email.confidence} /></div>) : <span className="muted">No email found</span>}</div></td>
         <td><span>{(user.followers ?? 0).toLocaleString()} followers</span><span className="muted">{user.public_repos ?? 0} repos</span></td>
         <td>{new Date(user.last_checked_at).toLocaleDateString()}</td></tr>)}</tbody></table></div>
-      {!items.length && <Empty title="No users match" detail="Change the filters or run a collection." />}<Pager page={page} total={query.data!.total} pageSize={25} onPage={(value) => patch('page', String(value))} /></section>
+      {!items.length && <Empty title="No users match" detail="Change the filters or run a saved filter." />}<Pager page={page} total={query.data!.total} pageSize={25} onPage={(value) => patch('page', String(value))} /></section>
     {selected.size > 0 && <div className="selection-bar"><Badge tone="info">{selected.size} users</Badge><span>All active emails will be included regardless of confidence.</span><button className="button" onClick={() => setSelected(new Set())}>Clear</button></div>}
   </>;
 }

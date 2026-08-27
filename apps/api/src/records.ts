@@ -2,7 +2,6 @@ import { Body, ConflictException, Controller, Delete, Get, Injectable, NotFoundE
 import { createEmailSchema, emailQuerySchema, normalizeEmail, userQuerySchema, type EmailQuery, type UserQuery } from '@email-fetch/shared';
 import { z } from 'zod';
 import { Database } from './database.js';
-import { HistoryService } from './history.service.js';
 import { parseWith } from './http.js';
 
 type SqlFilter = { clauses: string[]; values: unknown[] };
@@ -14,7 +13,7 @@ function add(filter: SqlFilter, expression: string, value: unknown) {
 
 @Injectable()
 export class RecordsService {
-  constructor(private readonly db: Database, private readonly history: HistoryService) {}
+  constructor(private readonly db: Database) {}
 
   async listUsers(query: UserQuery) {
     const filter: SqlFilter = { clauses: [`p.lifecycle_status <> 'deleted'`], values: [] };
@@ -56,10 +55,6 @@ export class RecordsService {
       filter.values
     );
     const total = Number(count.rows[0]!.count);
-    if (query.recordHistory) {
-      const { page: _page, pageSize: _pageSize, recordHistory: _record, sort, order, ...filters } = query;
-      await this.history.record('collected_users', filters, { sort, order }, total);
-    }
     return { items: rows.rows, page: query.page, pageSize: query.pageSize, total };
   }
 
@@ -110,10 +105,6 @@ export class RecordsService {
     );
     const count = await this.db.query<{ count: string }>(`SELECT count(*)::text AS count FROM email_addresses e ${where}`, filter.values);
     const total = Number(count.rows[0]!.count);
-    if (query.recordHistory) {
-      const { page: _page, pageSize: _pageSize, recordHistory: _record, sort, order, ...filters } = query;
-      await this.history.record('emails', filters, { sort, order }, total);
-    }
     return { items: rows.rows, page: query.page, pageSize: query.pageSize, total };
   }
 

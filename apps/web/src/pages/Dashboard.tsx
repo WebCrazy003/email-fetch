@@ -17,12 +17,12 @@ export function Dashboard() {
     ['Errors · 24h', data.recent_errors, AlertTriangle, 'red']
   ] as const;
   return <>
-    <PageHeader eyebrow="Workspace overview" title="Good morning." description="Your local GitHub collection pipeline at a glance."
-      action={<Link className="button primary" to="/collect"><Plus size={16} />New collection</Link>} />
+    <PageHeader eyebrow="Workspace overview" title="Good morning." description="Your saved-filter jobs and contact data at a glance."
+      action={<Link className="button primary" to="/filters/new"><Plus size={16} />New filter</Link>} />
     <section className="stat-grid">{cards.map(([label, value, Icon, color]) => <div className="stat" key={label}>
       <div className={`stat-icon ${color}`}><Icon size={20} /></div><span>{label}</span><strong>{value?.toLocaleString() ?? 0}</strong>
     </div>)}</section>
-    <section className="panel"><div className="panel-head"><div><h2>Recent jobs</h2><p>Latest collection activity</p></div><Link to="/jobs">View all</Link></div>
+    <section className="panel"><div className="panel-head"><div><h2>Recent jobs</h2><p>Latest filter runs</p></div><Link to="/jobs">View all</Link></div>
       <div className="table-wrap"><table><thead><tr><th>Job</th><th>Status</th><th>Phase</th><th>Inspected</th><th>Emails</th><th>Created</th></tr></thead>
       <tbody>{jobs.data!.items.map((job) => <tr key={job.id}><td><Link className="strong-link" to={`/jobs/${job.id}`}>{job.name || `GitHub · ${job.id.slice(0, 8)}`}</Link></td>
         <td><StatusBadge status={job.status} /></td><td>{job.phase.replaceAll('_', ' ')}</td><td>{job.counters_json.usersInspected ?? 0}</td>

@@ -16,7 +16,7 @@ const worker = new Worker<{ jobId: string }>(COLLECTION_QUEUE, async (job) => co
 });
 
 worker.on('failed', (job, error) => {
-  process.stderr.write(`Collection job ${job?.id ?? 'unknown'} failed: ${error.message}\n`);
+  process.stderr.write(`Job ${job?.id ?? 'unknown'} failed: ${error.message}\n`);
 });
 
 async function shutdown() {

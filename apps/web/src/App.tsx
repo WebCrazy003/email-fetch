@@ -1,16 +1,16 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
-import { Activity, Clock3, Database, Github, LayoutDashboard, Mail, Search, Settings, Users } from 'lucide-react';
+import { Activity, Database, Github, LayoutDashboard, ListFilter, Mail, Settings, Users } from 'lucide-react';
 import { Dashboard } from './pages/Dashboard.js';
-import { NewCollection } from './pages/NewCollection.js';
+import { NewFilter } from './pages/NewCollection.js';
+import { FiltersPage } from './pages/Filters.js';
 import { Jobs, JobDetail } from './pages/Jobs.js';
 import { UsersPage } from './pages/Users.js';
 import { EmailsPage } from './pages/Emails.js';
-import { HistoryPage } from './pages/History.js';
 import { SettingsPage } from './pages/Settings.js';
 
 const links = [
-  ['/', LayoutDashboard, 'Dashboard'], ['/collect', Search, 'New collection'], ['/jobs', Activity, 'Jobs'],
-  ['/users', Users, 'Collected users'], ['/emails', Mail, 'Emails'], ['/history', Clock3, 'Search history'], ['/settings', Settings, 'Settings']
+  ['/', LayoutDashboard, 'Dashboard'], ['/filters', ListFilter, 'Filters'], ['/jobs', Activity, 'Jobs'],
+  ['/users', Users, 'Users'], ['/emails', Mail, 'Emails'], ['/settings', Settings, 'Settings']
 ] as const;
 
 export function App() {
@@ -23,12 +23,14 @@ export function App() {
     <main className="content">
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/collect" element={<NewCollection />} />
+        <Route path="/filters" element={<FiltersPage />} />
+        <Route path="/filters/new" element={<NewFilter />} />
         <Route path="/jobs" element={<Jobs />} />
         <Route path="/jobs/:id" element={<JobDetail />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/emails" element={<EmailsPage />} />
-        <Route path="/history" element={<HistoryPage />} />
+        <Route path="/collect" element={<Navigate to="/filters/new" replace />} />
+        <Route path="/history" element={<Navigate to="/filters" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

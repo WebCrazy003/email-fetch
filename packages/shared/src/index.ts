@@ -47,12 +47,12 @@ export const collectionFiltersSchema = z
 
 export type CollectionFilters = z.infer<typeof collectionFiltersSchema>;
 
-export const createJobSchema = z.object({
-  name: z.string().trim().max(120).optional(),
+export const createFilterSchema = z.object({
+  name: z.string().trim().min(1).max(120),
   source: z.literal('github').default('github'),
   filters: collectionFiltersSchema
 });
-export type CreateJobInput = z.infer<typeof createJobSchema>;
+export type CreateFilterInput = z.infer<typeof createFilterSchema>;
 
 export const jobStatusSchema = z.enum([
   'queued',
@@ -81,8 +81,7 @@ export const userQuerySchema = z.object({
   sort: z.enum(['last_checked', 'first_seen', 'login', 'followers']).default('last_checked'),
   order: z.enum(['asc', 'desc']).default('desc'),
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(25),
-  recordHistory: queryBoolean.default(false)
+  pageSize: z.coerce.number().int().min(1).max(100).default(25)
 });
 export type UserQuery = z.infer<typeof userQuerySchema>;
 
@@ -96,8 +95,7 @@ export const emailQuerySchema = z.object({
   sort: z.enum(['email', 'first_seen', 'last_seen', 'last_sent']).default('last_seen'),
   order: z.enum(['asc', 'desc']).default('desc'),
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(25),
-  recordHistory: queryBoolean.default(false)
+  pageSize: z.coerce.number().int().min(1).max(100).default(25)
 });
 export type EmailQuery = z.infer<typeof emailQuerySchema>;
 
