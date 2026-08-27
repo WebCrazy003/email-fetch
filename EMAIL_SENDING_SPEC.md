@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Add a second-stage workflow that lets an authorized operator select stored email addresses, compose a message, and send it automatically to every eligible selected recipient through a connected Gmail account.
+Add a second-stage workflow that lets the local operator select users and all of their stored email addresses from the **Collected Users** list, compose a message, and send it automatically to every otherwise eligible selected address through a connected Gmail account.
 
 The feature must run asynchronously, show sending progress, record the outcome for every recipient, and clearly mark successful and failed send results in the user and email management tables.
 
@@ -12,7 +12,7 @@ This specification depends on the records defined in [github_spec.md](./github_s
 
 ## 2. Goals
 
-- Select one, many, or all filtered eligible email records for a send.
+- Select one, many, a page of, or all filtered users and include all active stored emails attached to each selected user.
 - Compose a subject and plain-text or HTML message.
 - Queue sending work outside the web request lifecycle.
 - Show live or near-live campaign and recipient status.
@@ -35,31 +35,17 @@ This specification depends on the records defined in [github_spec.md](./github_s
 - Sending to records that are suppressed, deleted, invalid, or no longer public.
 - Treating a public email address as proof of consent or permission to send.
 
-## 4. Roles and permissions
+## 4. Local operator
 
-### Administrator
-
-- Configures the Gmail integration and global sending limits.
-- Grants or removes sending permissions.
-- Can view all campaigns, recipient outcomes, and sending audit events.
-- Can disconnect a Gmail account or disable sending globally.
-
-### Sender
-
-- Creates campaigns from eligible email records.
-- Sends test messages.
-- Starts, pauses, resumes, or cancels their campaigns as allowed.
-- Views campaign and recipient status.
-
-### Operator or Viewer
-
-- Cannot send unless separately granted the Sender permission.
-- May view sending status only to the extent permitted by their role.
+- The MVP has one trusted local operator and no application login, roles, or sending permissions.
+- The operator configures Gmail, selects recipients, sends tests, starts or controls campaigns, and views every recipient outcome.
+- Gmail OAuth remains required because it authorizes access to the external Gmail account; it is not application-user authentication.
+- The application must remain local-only unless authentication and authorization are added later.
 
 ## 5. Primary workflow
 
-1. A sender opens the **Collected Users** or **Emails** table.
-2. The sender filters the table and selects individual records, the current page, or all matching eligible results.
+1. The operator opens the **Collected Users** table.
+2. The operator filters and selects individual users, the current page, or all matching users. Selection includes every active stored email attached to each selected user, including `confirmed`, `likely`, and `unsure` addresses.
 3. The sender chooses **Create email campaign**.
 4. The application creates an immutable selection snapshot and reports selected, eligible, suppressed, invalid, and previously sent counts.
 5. The sender selects a connected Gmail sender account.
@@ -76,13 +62,13 @@ This specification depends on the records defined in [github_spec.md](./github_s
 
 ## 6. Recipient selection
 
-- Each row with an eligible active email has a selection checkbox.
-- Selection is based on canonical `email_addresses.normalized_email` primary keys, not unnormalized copied address strings.
-- **Select current page** selects only visible eligible rows.
-- **Select all matching** stores the current server-side filter definition and resolves it into an immutable recipient snapshot before review.
+- Each collected-user row has a selection checkbox when the user has at least one active stored email.
+- Selecting a user includes all active email addresses linked through `person_email_addresses`, regardless of confidence. Selection resolves to canonical `email_addresses.normalized_email` primary keys, not copied address strings.
+- **Select current page** selects all active emails for the visible selected users.
+- **Select all matching** stores the current server-side user filter definition and resolves all active emails for all matching users into an immutable recipient snapshot before review.
 - The UI must show excluded counts and reasons before confirmation.
-- If a person has multiple email addresses, the default is one selected address per person. A sender may explicitly choose multiple addresses if policy permits.
-- Duplicate normalized addresses collapse to one campaign recipient unless an administrator-approved override exists.
+- If a person has multiple active email addresses, all of them are included. The review screen groups them by person and displays confidence and discovery type without using confidence as an eligibility gate.
+- Duplicate normalized addresses collapse to one campaign recipient. When one address is linked to several selected users, the review groups all links and disables person-specific merge fields unless the operator explicitly chooses the applicable person.
 - Changes to the source table after snapshot creation do not silently add recipients.
 - Suppression, deletion, validity, and prior-send rules are re-evaluated just before sending.
 
@@ -94,7 +80,7 @@ An address is eligible only when:
 - It has not been deleted or suppressed.
 - Its person, source account, domain, and normalized email are not suppressed.
 - It passes any configured validity requirement.
-- Its confidence is `confirmed` or `likely` under the default policy. An `unsure` or guessed address is excluded unless an administrator-enabled campaign policy explicitly allows it and the review screen identifies it as uncertain.
+- Confidence does not determine eligibility. An explicitly selected `confirmed`, `likely`, `unsure`, or guessed address may be sent, but confidence and discovery type must remain visible during review.
 - It satisfies the selected campaign's legal-purpose or consent policy fields.
 - It is not blocked by the campaign's duplicate-send policy.
 
@@ -104,7 +90,7 @@ Default duplicate policy:
 - A retried task with the same idempotency key must not create a second message.
 - If the recipient was successfully sent before a timeout or worker crash, reconciliation must check the stored provider message ID before retrying.
 - A new campaign may send to an address previously contacted by another campaign only when the configured contact policy allows it.
-- An explicit **allow repeat contact** option may be administrator-only and must show the last send date before confirmation.
+- An explicit **allow repeat contact** option requires a separate confirmation and must show the last send date before confirmation.
 
 ## 8. Campaign and recipient states
 
@@ -145,7 +131,7 @@ Default duplicate policy:
 
 ### Application-level configuration
 
-Administrators configure:
+The local operator configures:
 
 - Google OAuth client ID and client-secret reference.
 - Authorized redirect URI.
@@ -161,7 +147,7 @@ Administrators configure:
 - Whether repeat contact is permitted and its cooldown period.
 - Test-recipient allowlist for non-production environments.
 
-Raw client secrets and refresh tokens must be stored in a secret manager or encrypted credential store. They must never be returned to the browser, written to logs, or stored in generic settings JSON.
+Raw client secrets and refresh tokens must be stored in a protected local credential file or encrypted credential store. They must never be returned to the browser, written to logs, or stored in generic settings JSON.
 
 ### Gmail account connection
 
@@ -232,7 +218,7 @@ Rules:
 The campaign page displays:
 
 - Campaign state and current phase.
-- Sender account, creator, creation time, scheduled time, start time, and completion time.
+- Sender account, creation time, scheduled time, start time, and completion time.
 - Total selected and total eligible.
 - Queued, sending, sent, retrying, failed, skipped, and cancelled counts.
 - Percentage complete when the final task count is known.
@@ -241,7 +227,7 @@ The campaign page displays:
 - Sanitized recent event/error log.
 - Paginated recipient table with outcome, attempts, last error category, and sent time.
 
-Status should update using Server-Sent Events or WebSockets, with polling as a fallback. Counters must come from persisted or reconcilable state rather than browser memory.
+Status updates use Server-Sent Events, with polling as a fallback. Counters must come from persisted or reconcilable state rather than browser memory.
 
 ## 13. User and email table changes
 
@@ -260,7 +246,7 @@ Display rules:
 - If the latest production campaign recipient reaches terminal `failed`, its result and the email's latest send status are **Failed**.
 - A failed result does not erase an earlier successful campaign-recipient record or decrement the historical send count. When both exist, the UI displays **Sent previously — latest attempt failed** while the latest result remains **Failed**.
 - For a person with several addresses, **Partially sent** means at least one active address was sent and at least one was not.
-- Hover or detail view shows the last sent time and campaign without exposing message content to unauthorized viewers.
+- Hover or detail view shows the last sent time and campaign.
 - Tables can filter by never sent, sent, failed latest attempt, campaign, and sent-date range.
 
 The table summary may be stored as denormalized fields for performance, but campaign-recipient history remains the source of truth and must be repairable by reconciliation.
@@ -272,7 +258,7 @@ The table summary may be stored as denormalized fields for performance, but camp
 - `id`
 - Provider key, initially `gmail`
 - Connected account address and external account ID
-- Display label and owner
+- Display label
 - Encrypted credential reference
 - Granted scopes
 - Status: active, unhealthy, revoked, or disabled
@@ -282,7 +268,7 @@ The table summary may be stored as denormalized fields for performance, but camp
 
 ### `email_campaigns`
 
-- `id`, name, and creator
+- `id` and name
 - Provider connection ID and provider adapter version
 - State
 - Sender name, sender address, and reply-to
@@ -334,9 +320,9 @@ These are projections derived from campaign recipients, not replacements for his
 - Unique `(campaign_id, normalized_email)` unless an explicitly supported multi-message campaign requires otherwise.
 - Unique provider idempotency key.
 - Index recipient state and next retry time for worker claiming.
-- Index campaign state, creator, and creation time.
+- Index campaign state and creation time.
 - Index `email_addresses.last_sent_at` and successful-send count for table filters.
-- Historical recipient rows retain their address snapshot according to retention policy even if the current record changes; deletion requirements may require redaction or irreversible hashing.
+- Historical recipient rows retain their address snapshot until the operator manually deletes the related campaign or data; the MVP has no automatic retention expiry.
 
 ## 15. API outline
 
@@ -352,9 +338,9 @@ These are projections derived from campaign recipients, not replacements for his
 - `POST /api/email-campaigns/{id}/cancel`
 - `GET /api/email-campaigns/{id}/recipients`
 - `GET /api/email-campaigns/{id}/events`
-- Administrator-only provider connection, OAuth callback, health-check, and limit endpoints.
+- Local-only provider connection, OAuth callback, health-check, and limit endpoints.
 
-Starting, testing, and other retry-prone mutations require idempotency keys. All endpoints require authorization and server-side validation.
+Starting, testing, and other retry-prone mutations require idempotency keys. All endpoints require server-side validation and must be reachable only through the local application boundary.
 
 ## 16. Provider adapter contract
 
@@ -372,17 +358,16 @@ The adapter returns normalized results such as accepted, transient failure, perm
 
 ## 17. Security, privacy, and abuse prevention
 
-- Sending requires a separate explicit permission from record viewing or export.
 - Public availability of an address does not by itself establish consent or a lawful basis for outreach.
 - Store the campaign purpose and applicable permission/legal-basis metadata before sending.
 - Apply global, source, person, email, and domain suppressions at selection and immediately before send.
 - Include a functional opt-out mechanism where required and process opt-outs promptly.
 - Never send to a suppression entry even if it remains in an old campaign snapshot.
 - Limit campaign size and sending rate, with stricter defaults for new accounts.
-- Audit selection, previews, tests, campaign confirmation, state changes, sends, exports, and provider-setting changes.
+- Audit selection, previews, tests, campaign confirmation, state changes, sends, and provider-setting changes.
 - Encrypt OAuth credentials and minimize access to message bodies and recipient history.
 - Redact tokens and unnecessary personal data from logs and errors.
-- Provide configurable retention and deletion behavior for campaign bodies, address snapshots, and provider identifiers.
+- Do not automatically expire campaign bodies, address snapshots, or provider identifiers in the MVP; retain them in the local database until manual deletion.
 - Require a policy and legal review before production outreach in each target jurisdiction.
 
 ## 18. Reliability and observability
@@ -391,13 +376,13 @@ The adapter returns normalized results such as accepted, transient failure, perm
 - Alerts for revoked credentials, abnormal failure/bounce signals, stalled campaigns, repeated retries, and unexpected volume.
 - Structured logs include campaign, recipient-task, worker, provider-connection, and correlation IDs, but not raw tokens or full message bodies.
 - Reconciliation verifies projection counters and repairs user/email table summaries.
-- Database backups and audit retention follow the privacy and deletion policy.
+- Local backups are operator-managed and may retain manually deleted records until the operator removes those backups.
 
 ## 19. MVP acceptance criteria
 
-1. An authorized sender can select individual emails, the current page, or all eligible records matching active filters.
+1. The local operator can select individual users, the current page, or all users matching active filters from the **Collected Users** list; every active email for each selected user is included regardless of confidence.
 2. The application displays excluded and eligible counts before a campaign is confirmed.
-3. An administrator can connect, test, disable, reauthorize, and disconnect a Gmail account through settings.
+3. The local operator can connect, test, disable, reauthorize, and disconnect a Gmail account through settings.
 4. A sender can create a subject and message, preview it, and send a test without marking a production recipient as sent.
 5. Confirming a campaign returns immediately while durable background tasks send to all eligible selected recipients.
 6. Campaign status and recipient counters update on the web page without a full refresh under normal browser support.
@@ -412,14 +397,14 @@ The adapter returns normalized results such as accepted, transient failure, perm
 15. Provider limits slow or pause the campaign and are visible to the sender.
 16. Every test, campaign start, successful send, failure, cancellation, and provider-setting change is auditable.
 17. Gmail-specific behavior exists only inside the Gmail provider adapter, and a dummy second provider can be registered without changing campaign tables or shared orchestration.
+18. An explicitly selected `unsure` or guessed email is sent when it otherwise passes suppression, deletion, syntactic-validity, and repeat-contact checks.
 
 ## 20. Open decisions before implementation
 
 - Must recipients have recorded consent, another documented lawful basis, or a source-specific outreach permission?
 - Is repeat contact across different campaigns permitted, and what cooldown applies?
 - What conservative daily/hourly caps and delay should apply per Gmail account?
-- Can multiple Gmail accounts be connected, and who may use each one?
+- Can multiple Gmail accounts be connected in the local workspace?
 - Are HTML messages and merge variables required in the MVP?
 - Is scheduling required in the MVP or only immediate sending?
 - How will opt-out requests enter the suppression system?
-- How long should message content, recipient snapshots, and provider identifiers be retained?

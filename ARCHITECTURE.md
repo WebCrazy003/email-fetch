@@ -8,7 +8,7 @@ Define an architecture for a platform that:
 - Supports source-specific filters and collection behavior.
 - Normalizes records into a shared person, account, and email model.
 - Runs collection jobs asynchronously with visible progress.
-- Lets authorized users manage collected records.
+- Lets one trusted local operator manage collected records.
 - Sends selected emails through pluggable email-provider integrations.
 - Runs Gmail and GitHub as the only production adapters in the first release without making either one a permanent platform dependency.
 
@@ -23,13 +23,13 @@ This document governs the boundaries shared by [github_spec.md](./github_spec.md
 5. **Idempotency by default:** duplicate queue delivery, retries, and worker restarts must not duplicate stored accounts or sent messages.
 6. **Incremental persistence:** progress and results are stored continuously.
 7. **Conservative identity resolution:** accounts are not merged merely because names or usernames resemble each other.
-8. **Policy at every boundary:** authorization, suppression, retention, rate limits, and source/provider rules are enforced centrally and again immediately before side effects.
+8. **Policy at every boundary:** suppression, rate limits, and source/provider rules are enforced centrally and again immediately before side effects.
 9. **Horizontal scalability:** stateless APIs and independently scalable worker pools.
 10. **Observable operations:** every job, batch, adapter call, and send can be traced without logging secrets.
 
 ## 3. Recommended deployment shape
 
-Start with a modular monolith for the API and domain logic, plus separate worker processes. This keeps transactional rules understandable while allowing collection and sending capacity to scale independently. Modules can become separate services later if measured load or team ownership requires it.
+Start with a Docker Compose deployment on the operator's local machine: a modular monolith for the API and domain logic plus separate worker processes. Bind the web interface to loopback by default. This keeps transactional rules understandable while allowing collection and sending capacity to scale independently. Modules can become separate services later if measured load requires it.
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,7 @@ flowchart LR
     API --> DB[(Relational database)]
     API --> Queue[(Durable queue)]
     API --> Cache[(Coordination cache)]
-    API --> Secrets[Secret manager]
+    API --> Secrets[Protected local credential store]
 
     Queue --> CW[Collection workers]
     Queue --> SW[Sending workers]
@@ -71,24 +71,24 @@ Logical separation is mandatory even when modules share a codebase or runtime.
 
 ### 4.1 Web application
 
-- Authentication, sessions, and role-based interfaces.
+- Local single-operator interface without application login or roles.
 - Collection filters and job creation.
 - Job and campaign monitoring.
 - User, source-account, and email management.
 - Campaign composition and recipient selection.
 - Source and provider settings.
-- Server-Sent Events or WebSocket client, with polling fallback.
+- Server-Sent Events client, with polling fallback.
 
 The browser never receives source tokens, Gmail refresh tokens, or secret references.
 
 ### 4.2 Application API
 
-- Authenticates and authorizes requests.
+- Validates requests received through the local application boundary.
 - Validates source capabilities and filters through the registry.
 - Creates collection jobs and email campaigns.
 - Resolves filtered recipient selections into snapshots.
 - Provides paginated management and status endpoints.
-- Applies suppression, retention, and export rules.
+- Applies suppression and send-eligibility rules.
 - Writes audit events for sensitive actions.
 - Publishes work only after associated database state is committed.
 
@@ -155,7 +155,7 @@ The MVP registry contains only the Gmail adapter. Shared sending modules must no
 ### 4.9 Progress event publisher
 
 - Reads committed job/campaign state or transactional outbox events.
-- Publishes compact status updates to subscribed authorized browsers.
+- Publishes compact status updates to the subscribed local browser.
 - Does not act as the system of record.
 - Allows clients to reconnect and retrieve the latest persisted snapshot.
 
@@ -163,8 +163,6 @@ The MVP registry contains only the Gmail adapter. Shared sending modules must no
 
 - Recover abandoned batches and recipient tasks.
 - Reconcile job/campaign counters and denormalized table summaries.
-- Enforce retention and scheduled deletion.
-- Remove expired exports.
 - Refresh integration health and detect revoked credentials.
 - Run bounded, rate-aware freshness checks when explicitly scheduled.
 
@@ -174,7 +172,8 @@ The MVP registry contains only the Gmail adapter. Shared sending modules must no
 erDiagram
     SOURCE ||--o{ SOURCE_ACCOUNT : contains
     PERSON ||--o{ SOURCE_ACCOUNT : owns
-    PERSON ||--o{ EMAIL_ADDRESS : has
+    PERSON ||--o{ PERSON_EMAIL_ADDRESS : has
+    EMAIL_ADDRESS ||--o{ PERSON_EMAIL_ADDRESS : linked_to
     EMAIL_ADDRESS ||--o{ EMAIL_SOURCE : evidenced_by
     SOURCE_ACCOUNT ||--o{ EMAIL_SOURCE : exposes
     COLLECTION_JOB ||--o{ JOB_RESULT : creates
@@ -206,9 +205,13 @@ erDiagram
     }
     EMAIL_ADDRESS {
       string normalized_email
-      uuid person_id
       string status
       datetime last_sent_at
+    }
+    PERSON_EMAIL_ADDRESS {
+      uuid person_id
+      string normalized_email
+      string relationship_type
     }
     EMAIL_SOURCE {
       string normalized_email
@@ -240,11 +243,11 @@ erDiagram
 ### 5.1 Identity rules
 
 - `source_accounts` are unique by `(source_id, external_account_id)`.
-- `email_addresses.normalized_email` is the global primary key; every writer uses the same versioned normalizer and an atomic upsert.
+- `email_addresses.normalized_email` is the global primary key; every writer trims and lowercases the complete address, applies IDNA domain normalization, and uses an atomic upsert.
 - Usernames are always source-scoped and may change.
 - A normalized email can be linked to multiple source accounts through provenance.
-- A person can own multiple source accounts and email addresses.
-- Exact shared public email may create a high-confidence merge candidate, but automatic merge policy must be configurable and auditable.
+- A person can own multiple source accounts and email addresses, and one email can be linked to multiple people through `person_email_addresses`.
+- Exact shared public email does not automatically merge people.
 - Conflicting or uncertain links remain separate rather than risking an incorrect merge.
 - Merges and splits preserve an audit trail and source evidence.
 
@@ -399,7 +402,6 @@ Use separate logical queues for:
 - Campaign expansion.
 - Email sending.
 - Reconciliation and maintenance.
-- Export creation.
 
 Queue requirements:
 
@@ -443,10 +445,9 @@ Fair scheduling should allocate bounded batches across jobs and campaigns rather
 - All tables use cursor or bounded server-side pagination.
 - Filter and sort fields are allowlisted and indexed.
 - Large select-all operations create asynchronous selection snapshots rather than transferring every ID through the browser.
-- Exports run asynchronously and produce encrypted, expiring files.
 - Progress endpoints send compact deltas and allow snapshot recovery after disconnect.
 - Expensive counts may use maintained projections rather than full-table scans.
-- API nodes remain stateless aside from sessions stored in a shared session mechanism when needed.
+- API nodes remain stateless; the local MVP has no application sessions.
 
 ## 14. Database scalability
 
@@ -457,9 +458,9 @@ Start with one relational database and design for growth:
 - Composite indexes aligned with worker claiming and management filters.
 - Partition high-volume append-only tables such as events, audit logs, and campaign recipients when measured size warrants it.
 - Use short transactions and skip-locked/lease-based task claiming where supported.
-- Keep raw payloads and large exports out of hot relational rows.
+- Keep unrestricted raw payloads out of hot relational rows.
 - Introduce read replicas only when observed read load requires them; never serve state-transition decisions from stale replicas.
-- Archive or delete records according to explicit retention policies.
+- Keep MVP records until explicit manual deletion; do not add automatic archival or expiry jobs.
 
 ## 15. Caching and coordination
 
@@ -475,24 +476,25 @@ It must not be the only copy of job checkpoints, recipient status, suppressions,
 
 ## 16. Security boundaries
 
-- Source and provider credentials live in a secret manager or dedicated encrypted store.
+- Source and provider credentials live in a protected local credential file or dedicated encrypted store, never generic settings JSON.
 - Workers receive the narrowest credential reference required for their adapter call.
-- Role checks are performed by the API and sensitive domain services.
+- The web server binds to loopback by default; non-loopback startup warns that the MVP has no authentication and must not be exposed to an untrusted network.
 - Suppression is a shared core service, not optional adapter behavior.
 - External profile text and HTML email content are untrusted and sanitized for their output context.
 - Adapter outbound network access is constrained to approved endpoints where deployment supports it.
+- Linked-website fetching blocks private/local addresses, DNS rebinding, cross-domain redirects, oversized responses, authentication, and form submission.
 - Logs redact authorization data, full message bodies, and unnecessary personal data.
 - Sensitive actions and settings changes create immutable audit events.
 - Encryption keys, application secrets, source credentials, and provider credentials have separate rotation paths.
 
-## 17. Privacy and deletion architecture
+## 17. Privacy and manual deletion architecture
 
 - Store only fields necessary for the documented purpose.
-- Attach retention classes to normalized data, raw payloads, logs, exports, and campaign history.
+- The MVP applies no automatic retention expiry; stored data remains until explicit manual deletion.
 - Suppression records survive ordinary deletion in privacy-preserving form where necessary to prevent recollection or re-contact.
-- A deletion workflow traverses person, source account, email, provenance, campaign snapshot, export, cache, and search projections.
+- A deletion workflow traverses person, source account, email, provenance, campaign snapshot, cache, and search projections.
 - Historical operational records should be redacted or irreversibly pseudonymized when they no longer need direct identifiers.
-- Backups follow documented expiration so deletion guarantees are accurate.
+- Backups are operator-managed; documentation warns that deleting live records does not delete separately created backups.
 - Adding a source or provider requires documenting its data flows and deletion behavior.
 
 ## 18. Observability
@@ -566,7 +568,7 @@ No campaign-recipient table change should be necessary solely to add a provider.
 - Normalization and deterministic keys.
 - Identity merge/split rules.
 - Suppression at collection and send boundaries.
-- State machines and authorization.
+- State machines and local-boundary request validation.
 - Message rendering and header/HTML safety.
 - Adapter error normalization.
 
@@ -607,7 +609,6 @@ Names are illustrative and technology-neutral:
 
 ```text
 application/
-  auth/
   collection/
     domain/
     orchestration/
@@ -631,7 +632,6 @@ application/
     outbox/
     progress/
   audit/
-  retention/
   web/
 ```
 
@@ -641,7 +641,7 @@ Dependency direction must point from adapters toward contracts and from delivery
 
 ### Stage 1 — Foundation
 
-- Modular application/API, database, durable queue, transactional outbox, audit, auth, and secrets.
+- Local modular application/API, database, durable queue, transactional outbox, audit, and protected credentials.
 - Source and provider contracts plus registries.
 - Mock adapters and contract test suites.
 
@@ -649,7 +649,7 @@ Dependency direction must point from adapters toward contracts and from delivery
 
 - GitHub adapter.
 - Collection orchestration, normalized contact storage, progress, and management UI.
-- Suppression, export, reconciliation, and retention basics.
+- Suppression, manual deletion, and reconciliation basics; no export or automatic retention subsystem.
 
 ### Stage 3 — Gmail sending
 
@@ -682,14 +682,12 @@ Dependency direction must point from adapters toward contracts and from delivery
 12. Every successful send retains campaign, recipient, sender connection, provider ID, and acceptance timestamp.
 13. Management tables can filter across sources without adapter-specific queries in the UI.
 14. Secrets never enter queue payloads, browser responses, generic JSON settings, or logs.
+15. The MVP binds to loopback, requires no application login, and provides no export or automatic-retention subsystem.
+16. One globally unique email can be linked to multiple people without merging those people.
 
 ## 26. Open architecture decisions
 
-- Which application language/framework, queue, database, cache, and deployment platform will be used?
-- Is the first release single-organization, or is tenant isolation required from day one?
 - Will source/provider adapters ship in-process or as separately deployable services?
 - Which transactional outbox and worker-lease pattern best matches the selected database/queue?
-- Is real-time progress best delivered by Server-Sent Events or WebSockets on the target platform?
-- What volumes are expected for source accounts, emails, active collection jobs, campaigns, and daily sends?
 - Which website and email provider are likely to be second, so contracts can be validated against realistic differences?
 - Which cross-source identity matches may be automatic, and which require manual review?
