@@ -1,0 +1,21 @@
+{
+  "name": "email-fetch",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @email-fetch/shared && npm run build -w @email-fetch/api && npm run build -w @email-fetch/web",
+    "dev": "concurrently -n shared,api,worker,web -c cyan,green,yellow,magenta \"npm run dev -w @email-fetch/shared\" \"npm run dev -w @email-fetch/api\" \"npm run worker:dev -w @email-fetch/api\" \"npm run dev -w @email-fetch/web\"",
+    "test": "npm run test -w @email-fetch/shared && npm run test -w @email-fetch/api",
+    "typecheck": "npm run build -w @email-fetch/shared && npm run typecheck -w @email-fetch/api && npm run typecheck -w @email-fetch/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
