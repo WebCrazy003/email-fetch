@@ -26,4 +26,16 @@ describe('Collector checkpoints', () => {
       2
     ]);
   });
+
+  it('finishes a cancelling job without resuming discovery', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [{ id: 'job-id', status: 'cancelling', filters_json: {}, counters_json: {} }] })
+      .mockResolvedValue({ rows: [] });
+    const collector = new Collector({ query } as unknown as Database, {} as Redis);
+
+    await collector.run('job-id');
+
+    expect(query.mock.calls.some(([statement]) => String(statement).includes("status = 'cancelled'"))).toBe(true);
+    expect(query.mock.calls.some(([, values]) => Array.isArray(values) && values.includes('job_cancelled'))).toBe(true);
+  });
 });

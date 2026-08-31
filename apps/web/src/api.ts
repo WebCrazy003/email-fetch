@@ -3,7 +3,7 @@ const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? 'http://127.0.0.1:3000';
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_ORIGIN}/api${path}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...options?.headers }
+    headers: { ...(options?.body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...options?.headers }
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: response.statusText })) as { message?: string };
@@ -14,6 +14,10 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 
 export function eventStreamUrl(jobId: string) {
   return `${API_ORIGIN}/api/jobs/${jobId}/stream`;
+}
+
+export function campaignEventStreamUrl(campaignId: string) {
+  return `${API_ORIGIN}/api/email-campaigns/${campaignId}/stream`;
 }
 
 export function queryString(values: Record<string, unknown>) {

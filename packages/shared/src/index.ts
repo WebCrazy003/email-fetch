@@ -106,6 +106,35 @@ export const createEmailSchema = z.object({
   discoveryType: discoveryTypeSchema.default('source_profile')
 });
 
+const safeHeader = z.string().trim().min(1).max(998).refine((value) => !/[\r\n]/.test(value), 'Header values cannot contain line breaks');
+
+export const emailTemplateInputSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(500).optional().default(''),
+  subject: safeHeader.max(200),
+  bodyText: z.string().trim().min(1).max(50_000)
+});
+export type EmailTemplateInput = z.infer<typeof emailTemplateInputSchema>;
+
+export const campaignSelectionSchema = z.object({
+  emailIds: z.array(z.string().trim().email()).min(1).max(100).transform((items) => [...new Set(items.map(normalizeEmail))])
+});
+
+export const createEmailCampaignSchema = campaignSelectionSchema.extend({
+  name: z.string().trim().min(1).max(120),
+  templateId: z.string().uuid(),
+  senderName: safeHeader.max(120).default('Richard Wang'),
+  replyTo: z.union([z.string().trim().email(), z.literal('')]).optional().default(''),
+  purpose: z.string().trim().min(1).max(120).default('direct_outreach')
+});
+export type CreateEmailCampaignInput = z.infer<typeof createEmailCampaignSchema>;
+
+export const campaignTestSchema = z.object({
+  templateId: z.string().uuid(),
+  senderName: safeHeader.max(120).default('Richard Wang'),
+  replyTo: z.union([z.string().trim().email(), z.literal('')]).optional().default('')
+});
+
 export function normalizeEmail(value: string): string {
   const trimmed = value.trim();
   const at = trimmed.lastIndexOf('@');

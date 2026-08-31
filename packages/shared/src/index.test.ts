@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectionFiltersSchema, createFilterSchema, normalizeEmail, userQuerySchema } from './index.js';
+import { campaignSelectionSchema, collectionFiltersSchema, createEmailCampaignSchema, createFilterSchema, emailTemplateInputSchema, normalizeEmail, userQuerySchema } from './index.js';
 
 describe('normalizeEmail', () => {
   it('trims and lowercases the complete address', () => {
@@ -31,5 +31,18 @@ describe('createFilterSchema', () => {
 describe('query booleans', () => {
   it('parses explicit false without JavaScript string coercion', () => {
     expect(userQuerySchema.parse({ suppressed: 'false' })).toMatchObject({ suppressed: false });
+  });
+});
+
+describe('email sending schemas', () => {
+  it('deduplicates and normalizes explicitly selected email IDs', () => {
+    expect(campaignSelectionSchema.parse({ emailIds: [' Person@Example.com ', 'person@example.com'] }).emailIds).toEqual(['person@example.com']);
+  });
+
+  it('rejects header injection in templates and campaigns', () => {
+    expect(emailTemplateInputSchema.safeParse({ name: 'Intro', subject: 'Hello\nBcc: x@example.com', bodyText: 'Hi' }).success).toBe(false);
+    expect(createEmailCampaignSchema.safeParse({
+      emailIds: ['person@example.com'], templateId: '52d2b647-7c9a-42b6-a1ec-77a9f4161968', name: 'Campaign', senderName: 'Richard\r\nBcc: x'
+    }).success).toBe(false);
   });
 });

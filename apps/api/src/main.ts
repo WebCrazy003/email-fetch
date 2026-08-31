@@ -5,11 +5,23 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import helmet from '@fastify/helmet';
 import { AppModule } from './app.module.js';
 
+function isAllowedLocalOrigin(origin: string) {
+  try {
+    const url = new URL(origin);
+    return url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 async function bootstrap() {
   const adapter = new FastifyAdapter({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, trustProxy: false });
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter);
-  const webOrigin = process.env.WEB_ORIGIN ?? 'http://127.0.0.1:5173';
-  app.enableCors({ origin: [webOrigin, 'http://127.0.0.1:8080'], credentials: false });
+  app.enableCors({
+    origin: (origin, callback) => callback(null, !origin || isAllowedLocalOrigin(origin)),
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'],
+    credentials: false
+  });
   await app.register(helmet, { contentSecurityPolicy: false });
   app.setGlobalPrefix('api');
   app.getHttpAdapter().getInstance().addHook('onRequest', async (request: { method: string; headers: Record<string, unknown> }, reply: {
@@ -25,8 +37,7 @@ async function bootstrap() {
       return;
     }
     const origin = request.headers.origin;
-    const allowedOrigins = new Set([webOrigin, 'http://127.0.0.1:8080', 'http://localhost:8080']);
-    if (typeof origin === 'string' && !allowedOrigins.has(origin)) {
+    if (typeof origin === 'string' && !isAllowedLocalOrigin(origin)) {
       reply.code(403).send({ message: 'Request origin is not allowed' });
     }
   });

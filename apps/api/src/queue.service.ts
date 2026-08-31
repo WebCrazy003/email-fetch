@@ -3,11 +3,13 @@ import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 
 export const COLLECTION_QUEUE = 'collection';
+export const EMAIL_SEND_QUEUE = 'email-send';
 
 @Injectable()
 export class QueueService implements OnModuleDestroy {
   readonly connection = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: null });
   readonly collection = new Queue(COLLECTION_QUEUE, { connection: this.connection });
+  readonly emailSend = new Queue(EMAIL_SEND_QUEUE, { connection: this.connection });
 
   enqueue(jobId: string) {
     return this.collection.add('collect', { jobId }, {
@@ -19,8 +21,20 @@ export class QueueService implements OnModuleDestroy {
     });
   }
 
+  enqueueEmail(recipientId: string, campaignId: string, delay: number) {
+    return this.emailSend.add('send-email', { recipientId, campaignId }, {
+      jobId: recipientId,
+      delay,
+      attempts: 4,
+      backoff: { type: 'exponential', delay: 5_000 },
+      removeOnComplete: 500,
+      removeOnFail: 500
+    });
+  }
+
   async onModuleDestroy() {
     await this.collection.close();
+    await this.emailSend.close();
     await this.connection.quit();
   }
 }

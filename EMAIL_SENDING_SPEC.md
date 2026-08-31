@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Add a second-stage workflow that lets the local operator select users and all of their stored email addresses from the **Collected Users** list, compose a message, and send it automatically to every otherwise eligible selected address through a connected Gmail account.
+Add a second-stage workflow that lets the local operator select one or more stored email addresses directly from the **Emails** page, choose a reusable email template, and send the rendered message automatically to every otherwise eligible selected address through a connected Gmail account.
 
 The feature must run asynchronously, show sending progress, record the outcome for every recipient, and clearly mark successful and failed send results in the user and email management tables.
 
@@ -12,8 +12,9 @@ This specification depends on the records defined in [github_spec.md](./github_s
 
 ## 2. Goals
 
-- Select one, many, a page of, or all filtered users and include all active stored emails attached to each selected user.
-- Compose a subject and plain-text or HTML message.
+- Select one email, several emails, or all email records on the current **Emails** page.
+- Create, view, update, and delete reusable email templates.
+- Choose a template for the selected email recipients and create an immutable campaign message snapshot from it.
 - Queue sending work outside the web request lifecycle.
 - Show live or near-live campaign and recipient status.
 - Mark a recipient as sent only after Gmail accepts the message for sending.
@@ -31,6 +32,7 @@ This specification depends on the records defined in [github_spec.md](./github_s
 - Automated replies or multi-step sequences.
 - Open or click tracking.
 - Attachment support.
+- HTML email and scheduled sending.
 - Automatic generation of message content.
 - Sending to records that are suppressed, deleted, invalid, or no longer public.
 - Treating a public email address as proof of consent or permission to send.
@@ -44,31 +46,37 @@ This specification depends on the records defined in [github_spec.md](./github_s
 
 ## 5. Primary workflow
 
-1. The operator opens the **Collected Users** table.
-2. The operator filters and selects individual users, the current page, or all matching users. Selection includes every active stored email attached to each selected user, including `confirmed`, `likely`, and `unsure` addresses.
-3. The sender chooses **Create email campaign**.
+1. The operator opens the **Emails** table and applies any desired filters.
+2. The operator selects one or several email rows, or uses the table-header checkbox to select all selectable email rows on the current page.
+3. The operator chooses **Send email**.
 4. The application creates an immutable selection snapshot and reports selected, eligible, suppressed, invalid, and previously sent counts.
-5. The sender selects a connected Gmail sender account.
-6. The sender enters the sender name, optional reply-to address, subject, plain-text body, and optional HTML body.
-7. The sender reviews a preview and sends a test email to an approved address.
-8. A confirmation screen shows the final recipient count, duplicate policy, rate limits, and estimated duration.
-9. The sender confirms the campaign.
-10. The API creates background recipient tasks and immediately returns a campaign ID.
-11. Workers re-check eligibility immediately before each send and submit messages through the Gmail provider adapter.
-12. The campaign page updates counters, recent errors, provider-limit status, and estimated completion.
-13. When Gmail accepts a message, its recipient task becomes `sent` and the associated email record's sending summary is updated.
-14. When a send receives a permanent error or exhausts its allowed retries, its recipient task and result become `failed`, and the associated email record's latest-attempt summary is updated with the failure.
-15. The user and email tables show the latest send state and timestamp.
+5. The sender selects an active email template.
+6. The application renders a preview from the selected template and representative recipient data, and reports any missing or invalid merge values.
+7. The sender selects a connected Gmail sender account, or the application uses the configured default account when only one choice is needed.
+8. The sender provides the campaign name, confirms the sender name and optional reply-to address, and may send a test email to an approved address.
+9. A confirmation screen shows the selected template and version, final recipient count, duplicate policy, rate limits, and estimated duration.
+10. The sender confirms **Send automatically**.
+11. The API snapshots the selected template content, creates background recipient tasks, starts the campaign, and immediately returns a campaign ID.
+12. Workers re-check eligibility immediately before each send, render recipient-specific merge fields from the template snapshot, and submit messages through the Gmail provider adapter.
+13. The campaign page updates counters, recent errors, provider-limit status, and estimated completion.
+14. When Gmail accepts a message, its recipient task becomes `sent` and the associated email record's sending summary is updated.
+15. When a send receives a permanent error or exhausts its allowed retries, its recipient task and result become `failed`, and the associated email record's latest-attempt summary is updated with the failure.
+16. The Emails table shows the latest send state and timestamp for each address.
 
 ## 6. Recipient selection
 
-- Each collected-user row has a selection checkbox when the user has at least one active stored email.
-- Selecting a user includes all active email addresses linked through `person_email_addresses`, regardless of confidence. Selection resolves to canonical `email_addresses.normalized_email` primary keys, not copied address strings.
-- **Select current page** selects all active emails for the visible selected users.
-- **Select all matching** stores the current server-side user filter definition and resolves all active emails for all matching users into an immutable recipient snapshot before review.
+- Each email row has a selection checkbox. Rows that are deleted, suppressed, or syntactically invalid are visibly disabled and cannot be selected.
+- Selecting an email adds its canonical `email_addresses.normalized_email` primary key to the pending selection, not a copied display string.
+- The operator can select or deselect individual rows and can keep several rows selected at the same time.
+- The table-header checkbox selects or deselects all selectable email rows returned on the current page. It does not implicitly select results on other pages.
+- The table-header checkbox is checked when every selectable row on the page is selected and indeterminate when only some are selected.
+- Changing pages or filters must clearly preserve the explicit selected-address count or offer a deliberate **Clear selection** action; it must never silently add newly visible addresses.
+- **Send email** is disabled until at least one address is selected.
+- Starting the send workflow resolves the selected canonical email IDs into an immutable recipient snapshot before review.
 - The UI must show excluded counts and reasons before confirmation.
-- If a person has multiple active email addresses, all of them are included. The review screen groups them by person and displays confidence and discovery type without using confidence as an eligibility gate.
-- Duplicate normalized addresses collapse to one campaign recipient. When one address is linked to several selected users, the review groups all links and disables person-specific merge fields unless the operator explicitly chooses the applicable person.
+- Only explicitly selected email rows are included. Selecting one address does not automatically include other addresses belonging to the same person.
+- The review screen displays each selected address's confidence, discovery type, linked person, and current send status without using confidence as an eligibility gate.
+- Duplicate normalized addresses collapse to one campaign recipient. When one address is linked to several users, the review groups all links and disables person-specific merge fields unless the operator explicitly chooses the applicable person.
 - Changes to the source table after snapshot creation do not silently add recipients.
 - Suppression, deletion, validity, and prior-send rules are re-evaluated just before sending.
 
@@ -89,8 +97,7 @@ Default duplicate policy:
 - Never send the same campaign to the same normalized email more than once.
 - A retried task with the same idempotency key must not create a second message.
 - If the recipient was successfully sent before a timeout or worker crash, reconciliation must check the stored provider message ID before retrying.
-- A new campaign may send to an address previously contacted by another campaign only when the configured contact policy allows it.
-- An explicit **allow repeat contact** option requires a separate confirmation and must show the last send date before confirmation.
+- A new campaign must not send to an address that was successfully contacted by any earlier production campaign.
 
 ## 8. Campaign and recipient states
 
@@ -98,7 +105,6 @@ Default duplicate policy:
 
 - `draft`
 - `validating`
-- `scheduled`
 - `queued`
 - `sending`
 - `paused`
@@ -144,7 +150,7 @@ The local operator configures:
 - Retry limit and backoff settings.
 - Default sender name and reply-to address.
 - Allowed sender accounts or Workspace domain, if applicable.
-- Whether repeat contact is permitted and its cooldown period.
+- Repeat contact is disabled.
 - Test-recipient allowlist for non-production environments.
 
 Raw client secrets and refresh tokens must be stored in a protected local credential file or encrypted credential store. They must never be returned to the browser, written to logs, or stored in generic settings JSON.
@@ -159,44 +165,64 @@ The **Settings → Email Providers** page must support:
 - Send a test message.
 - Reauthorize an expired or revoked connection.
 - Disable or disconnect an account.
-- Select a default account when more than one is allowed.
+- Only one Gmail account may be connected in the MVP; connecting another replaces the previous connection after OAuth confirmation.
 
 Disconnecting an account prevents new sends but does not remove historical campaign records.
 
 ### Provider limits
 
-- The platform must enforce conservative configurable limits below provider limits.
+- The platform enforces configurable defaults of 100 messages per rolling 24 hours, 20 messages per rolling hour, and at least five seconds between submissions.
 - Workers must recognize quota/rate-limit responses, stop claiming new tasks for that account, and set affected campaigns to `provider_limited`.
 - The UI must show the reason and the next retry time when available.
 - Limits are tracked per connected sender account and globally.
 - A sender cannot bypass caps by repeatedly pausing, cloning, or recreating a campaign.
 
-## 10. Message composition
+## 10. Email templates and message composition
+
+### Template management
+
+The application adds an **Email Templates** page for reusable message content. The local operator can:
+
+- Create a template.
+- List and view existing templates.
+- Edit a template's name, description, subject, plain-text body, and allowlisted merge fields.
+- Duplicate an existing template as a starting point for a new template.
+- Delete a template after confirmation. Deletion is implemented as a soft archive so send history remains intact.
+
+Template rules:
+
+- Template name, subject, and plain-text body are required. Template names must be unique among active templates.
+- Templates are plain text in the MVP.
+- Supported merge fields are selected from an explicit allowlist, such as recipient display name, source username, and email address.
+- Preview validation must report unknown variables and missing required fallbacks before a template can be used for sending.
+- Every successful template update increments its revision number so the selected content can be identified during review.
+- Deleting a template archives it and prevents its use in new campaigns but does not alter campaign snapshots or historical send records.
+- A template is provider-neutral and cannot contain Gmail credentials or provider-specific API data.
+
+### Campaign message composition
 
 Required fields:
 
 - Campaign name.
+- Active email template and template revision.
 - Connected sender account.
 - Sender display name.
-- Subject.
-- Plain-text message body.
 - Purpose or campaign classification.
 
 Optional fields:
 
-- Reply-to address.
-- Sanitized HTML body with a generated plain-text fallback.
-- Per-recipient merge fields from an allowlist, such as display name or source username.
-- Schedule date and time.
+- Reply-to address; when omitted, replies go to the connected Gmail sender.
 
 Rules:
 
-- Subject and body length must be validated.
-- HTML must be sanitized before storage and sending.
+- The campaign subject and plain-text body come from the selected template.
+- Selecting a different template replaces the draft campaign preview only after explicit confirmation.
+- Subject and body length must be validated both when saving a template and when creating the campaign snapshot.
 - Unknown or missing merge variables fail preview validation or use an explicitly configured fallback.
 - Header values must be protected against newline/header injection.
 - Every message must contain sender identification and required opt-out information.
-- Templates are versioned or copied into the campaign so later template edits cannot change an approved campaign.
+- Template ID, revision, subject, plain-text body, and merge-field rules are copied into the campaign. Later template edits or deletion cannot change a draft after confirmation or a queued, sending, or completed campaign.
+- The confirmation action starts automatic background sending; the browser must not remain open for the campaign to continue.
 - A test send must be clearly marked as a test and must not change recipient records to `sent`.
 
 ## 11. Background processing
@@ -218,7 +244,7 @@ Rules:
 The campaign page displays:
 
 - Campaign state and current phase.
-- Sender account, creation time, scheduled time, start time, and completion time.
+- Sender account, creation time, start time, and completion time.
 - Total selected and total eligible.
 - Queued, sending, sent, retrying, failed, skipped, and cancelled counts.
 - Percentage complete when the final task count is known.
@@ -229,7 +255,15 @@ The campaign page displays:
 
 Status updates use Server-Sent Events, with polling as a fallback. Counters must come from persisted or reconcilable state rather than browser memory.
 
-## 13. User and email table changes
+## 13. Emails page and sending-status changes
+
+The **Emails** page adds:
+
+- A checkbox for each selectable email row.
+- A table-header checkbox for selecting all selectable rows on the current page.
+- A persistent selected-count indicator and **Clear selection** action.
+- A **Send email** action that opens template selection and campaign review.
+- Confidence, discovery type, linked user, eligibility, and previous-send status in the selection context.
 
 Add these columns or optional table fields:
 
@@ -247,11 +281,22 @@ Display rules:
 - A failed result does not erase an earlier successful campaign-recipient record or decrement the historical send count. When both exist, the UI displays **Sent previously — latest attempt failed** while the latest result remains **Failed**.
 - For a person with several addresses, **Partially sent** means at least one active address was sent and at least one was not.
 - Hover or detail view shows the last sent time and campaign.
-- Tables can filter by never sent, sent, failed latest attempt, campaign, and sent-date range.
+- The Emails table can filter by never sent, sent, failed latest attempt, campaign, and sent-date range.
 
 The table summary may be stored as denormalized fields for performance, but campaign-recipient history remains the source of truth and must be repairable by reconciliation.
 
 ## 14. Data model
+
+### `email_templates`
+
+- `id`
+- Unique active template name and optional description
+- Subject
+- Plain-text body
+- Allowlisted merge-field configuration and fallback values
+- Revision number
+- Status: active or archived
+- Created, updated, and archived timestamps
 
 ### `email_provider_connections`
 
@@ -269,14 +314,16 @@ The table summary may be stored as denormalized fields for performance, but camp
 ### `email_campaigns`
 
 - `id` and name
+- Template ID and selected template revision
+- Immutable template snapshot containing subject, plain-text body, and merge-field rules
 - Provider connection ID and provider adapter version
 - State
 - Sender name, sender address, and reply-to
-- Subject, plain-text body, and sanitized HTML body
+- Subject and plain-text body
 - Purpose/policy metadata
 - Duplicate policy
-- Selection-filter snapshot and selection counts
-- Schedule, start, completion, and cancellation timestamps
+- Selected-email ID snapshot and selection counts
+- Start, completion, and cancellation timestamps
 - Progress counters
 - Created and updated timestamps
 
@@ -318,6 +365,7 @@ These are projections derived from campaign recipients, not replacements for his
 ### Constraints and indexes
 
 - Unique `(campaign_id, normalized_email)` unless an explicitly supported multi-message campaign requires otherwise.
+- Unique active email-template name and an index on template status and updated time.
 - Unique provider idempotency key.
 - Index recipient state and next retry time for worker claiming.
 - Index campaign state and creation time.
@@ -326,8 +374,8 @@ These are projections derived from campaign recipients, not replacements for his
 
 ## 15. API outline
 
-- `POST /api/email-campaigns/selections` — resolve selected IDs or a filtered selection into a preview snapshot.
-- `POST /api/email-campaigns` — create a draft from a validated selection.
+- `POST /api/email-campaigns/selections` — resolve explicitly selected canonical email IDs into a preview snapshot.
+- `POST /api/email-campaigns` — create a draft from a validated email selection and active template revision.
 - `GET /api/email-campaigns` — list campaigns.
 - `GET /api/email-campaigns/{id}` — campaign configuration and progress.
 - `PATCH /api/email-campaigns/{id}` — edit a draft.
@@ -338,6 +386,12 @@ These are projections derived from campaign recipients, not replacements for his
 - `POST /api/email-campaigns/{id}/cancel`
 - `GET /api/email-campaigns/{id}/recipients`
 - `GET /api/email-campaigns/{id}/events`
+- `POST /api/email-templates` — create a template.
+- `GET /api/email-templates` — list active templates, with an explicit option to include archived templates.
+- `GET /api/email-templates/{id}` — retrieve a template and its current revision.
+- `PATCH /api/email-templates/{id}` — update a template and advance its revision.
+- `POST /api/email-templates/{id}/duplicate` — create a new template from an existing one.
+- `DELETE /api/email-templates/{id}` — soft-delete a template by archiving it after validation and confirmation.
 - Local-only provider connection, OAuth callback, health-check, and limit endpoints.
 
 Starting, testing, and other retry-prone mutations require idempotency keys. All endpoints require server-side validation and must be reachable only through the local application boundary.
@@ -361,7 +415,7 @@ The adapter returns normalized results such as accepted, transient failure, perm
 - Public availability of an address does not by itself establish consent or a lawful basis for outreach.
 - Store the campaign purpose and applicable permission/legal-basis metadata before sending.
 - Apply global, source, person, email, and domain suppressions at selection and immediately before send.
-- Include a functional opt-out mechanism where required and process opt-outs promptly.
+- Every production message includes a reply-based opt-out instruction. The operator manually processes opt-out replies with the Emails-page suppression action before sending another campaign.
 - Never send to a suppression entry even if it remains in an old campaign snapshot.
 - Limit campaign size and sending rate, with stricter defaults for new accounts.
 - Audit selection, previews, tests, campaign confirmation, state changes, sends, and provider-setting changes.
@@ -380,31 +434,30 @@ The adapter returns normalized results such as accepted, transient failure, perm
 
 ## 19. MVP acceptance criteria
 
-1. The local operator can select individual users, the current page, or all users matching active filters from the **Collected Users** list; every active email for each selected user is included regardless of confidence.
-2. The application displays excluded and eligible counts before a campaign is confirmed.
-3. The local operator can connect, test, disable, reauthorize, and disconnect a Gmail account through settings.
-4. A sender can create a subject and message, preview it, and send a test without marking a production recipient as sent.
-5. Confirming a campaign returns immediately while durable background tasks send to all eligible selected recipients.
-6. Campaign status and recipient counters update on the web page without a full refresh under normal browser support.
-7. Gmail acceptance stores the returned provider message ID, marks the recipient task `sent`, and updates the email's last-sent summary.
-8. A permanent provider failure or retry-exhausted transient failure marks the campaign-recipient state and result `failed`, records the failure category and timestamp, increments the failed counter, and shows **Failed** as the email's latest send result.
-9. Successfully sent records show **Sent**, last-sent time, and last campaign in user and email tables.
-10. A failed latest result remains **Failed** even when an earlier campaign succeeded; the UI also preserves and displays the earlier successful-send history.
-11. Suppressed, deleted, invalid, and disallowed repeat recipients are skipped even if they were eligible when initially selected.
-12. A worker restart or duplicate task delivery does not resend a successfully completed campaign recipient.
-13. Transient failures retry with backoff and remain `retry_wait` until retries are exhausted; terminal failures remain visible without blocking other recipients.
-14. Pausing stops new sends, resuming continues remaining tasks, and cancelling leaves already sent messages unchanged.
-15. Provider limits slow or pause the campaign and are visible to the sender.
-16. Every test, campaign start, successful send, failure, cancellation, and provider-setting change is auditable.
-17. Gmail-specific behavior exists only inside the Gmail provider adapter, and a dummy second provider can be registered without changing campaign tables or shared orchestration.
-18. An explicitly selected `unsure` or guessed email is sent when it otherwise passes suppression, deletion, syntactic-validity, and repeat-contact checks.
+1. The local operator can select one or several eligible email rows directly from the **Emails** page.
+2. The Emails table header can select or deselect every selectable email on the current page without selecting email records on other pages.
+3. Only explicitly selected email addresses are included; selecting an address does not automatically include other addresses belonging to the same person.
+4. The application displays excluded and eligible counts before a campaign is confirmed.
+5. The local operator can create, list, view, edit, duplicate, and delete email templates; deletion is a history-preserving soft archive.
+6. Editing or deleting a template does not change a campaign's immutable template snapshot or historical recipient records.
+7. After selecting emails, the operator can choose an active template, preview rendered content, choose the Gmail sender, and confirm automatic sending.
+8. The local operator can connect, test, disable, reauthorize, and disconnect a Gmail account through settings.
+9. A sender can preview a template and send a test without marking a production recipient as sent.
+10. Confirming **Send automatically** returns immediately while durable background tasks send the selected template snapshot to all eligible selected recipients, even if the browser is closed.
+11. Campaign status and recipient counters update on the web page without a full refresh under normal browser support.
+12. Gmail acceptance stores the returned provider message ID, marks the recipient task `sent`, and updates the email's last-sent summary.
+13. A permanent provider failure or retry-exhausted transient failure marks the campaign-recipient state and result `failed`, records the failure category and timestamp, increments the failed counter, and shows **Failed** as the email's latest send result.
+14. Successfully sent records show **Sent**, last-sent time, and last campaign in the Emails table and relevant user detail views.
+15. A failed latest result remains **Failed** even when an earlier campaign succeeded; the UI also preserves and displays the earlier successful-send history.
+16. Suppressed, deleted, invalid, and disallowed repeat recipients are skipped even if they were eligible when initially selected.
+17. A worker restart or duplicate task delivery does not resend a successfully completed campaign recipient.
+18. Transient failures retry with backoff and remain `retry_wait` until retries are exhausted; terminal failures remain visible without blocking other recipients.
+19. Pausing stops new sends, resuming continues remaining tasks, and cancelling leaves already sent messages unchanged.
+20. Provider limits slow or pause the campaign and are visible to the sender.
+21. Every template change, test, campaign start, successful send, failure, cancellation, and provider-setting change is auditable.
+22. Gmail-specific behavior exists only inside the Gmail provider adapter, and a dummy second provider can be registered without changing campaign tables or shared orchestration.
+23. An explicitly selected `unsure` or guessed email is sent when it otherwise passes suppression, deletion, syntactic-validity, and repeat-contact checks.
 
 ## 20. Open decisions before implementation
 
 - Must recipients have recorded consent, another documented lawful basis, or a source-specific outreach permission?
-- Is repeat contact across different campaigns permitted, and what cooldown applies?
-- What conservative daily/hourly caps and delay should apply per Gmail account?
-- Can multiple Gmail accounts be connected in the local workspace?
-- Are HTML messages and merge variables required in the MVP?
-- Is scheduling required in the MVP or only immediate sending?
-- How will opt-out requests enter the suppression system?

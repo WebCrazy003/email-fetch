@@ -24,6 +24,20 @@ Run infrastructure with `docker compose up -d postgres redis`, install dependenc
 
 The database schema is initialized from `infra/postgres/init.sql` when the PostgreSQL volume is first created.
 
+## Gmail sending
+
+The local application can send immediate, plain-text campaigns through one connected Gmail account.
+
+1. Enable the Gmail API and create a Google OAuth **Web application** client.
+2. Configure `http://127.0.0.1:8080` as an authorized JavaScript origin.
+3. Configure `http://127.0.0.1:3000/api/email-providers/gmail/oauth/callback` as an authorized redirect URI.
+4. Add `gmail.send` to the OAuth consent screen and add the sender account as a test user while the app is in Testing mode.
+5. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, `GMAIL_TOKEN_ENCRYPTION_KEY`, and `GMAIL_TEST_RECIPIENT` in `.env`. The `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` aliases are also supported.
+6. Open **Settings** and connect Gmail, then create a plain-text template under **Templates**.
+7. Select individual addresses or all active addresses on the current **Emails** page, choose a template, review the immutable preview, and confirm automatic sending.
+
+Refresh tokens are encrypted with AES-256-GCM before being stored. The encryption key and OAuth client secret must remain in the ignored `.env` file. The default safety policy allows one active campaign, blocks repeat contact, limits sends to 100 per rolling day and 20 per hour, and spaces Gmail submissions by at least five seconds. Every message includes a reply-based opt-out instruction; opt-outs are applied manually with the suppress action on the Emails page.
+
 ## Specifications
 
 The implementation follows these documents:

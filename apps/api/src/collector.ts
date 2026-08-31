@@ -13,6 +13,8 @@ const confidenceRank: Record<Confidence, number> = { unsure: 1, likely: 2, confi
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+class JobCancelledError extends Error {}
+
 function matchesPostFilters(profile: GitHubProfile, activity: string | null, filters: CollectionFilters) {
   if (filters.keywords.length) {
     const haystack = `${profile.bio ?? ''} ${profile.company ?? ''}`.toLowerCase();
@@ -39,7 +41,7 @@ export class Collector {
       await this.updateJob('rate_limited', 'waiting_for_github');
       await this.event('warning', 'github_rate_limited', 'GitHub rate limit reached', { resumeAt: resetAt.toISOString() });
       await sleep(wait);
-      await this.updateJob('running', 'resuming');
+      await this.resumeAfterRateLimit();
     }, async () => {
       this.counters.retries += 1;
       await this.saveCounters();
@@ -54,6 +56,10 @@ export class Collector {
     const job = await this.loadJob();
     this.counters = { ...emptyJobCounters(), ...(job.counters_json ?? {}) };
     if (['completed', 'cancelled'].includes(job.status)) return;
+    if (job.status === 'cancelling') {
+      await this.finishCancelled();
+      return;
+    }
     await this.updateJob('running', 'discovering', { started_at: 'COALESCE(started_at, now())' });
     await this.event('info', 'job_started', 'Job started');
     try {
@@ -184,6 +190,7 @@ export class Collector {
       );
       await this.event('info', 'job_completed', `Job ${finalStatus.replaceAll('_', ' ')}`, this.counters);
     } catch (error) {
+      if (error instanceof JobCancelledError) return;
       this.counters.errors += 1;
       await this.db.query(
         `UPDATE collection_jobs SET status = 'failed', phase = 'failed', counters_json = $2::jsonb,
@@ -205,8 +212,7 @@ export class Collector {
     while (true) {
       const job = await this.loadJob();
       if (job.status === 'cancelling' || job.status === 'cancelled') {
-        await this.db.query(`UPDATE collection_jobs SET status = 'cancelled', phase = 'cancelled', completed_at = now(), updated_at = now() WHERE id = $1`, [this.jobId]);
-        await this.event('info', 'job_cancelled', 'Job cancelled');
+        await this.finishCancelled();
         return 'cancelled';
       }
       if (job.status !== 'paused') return 'running';
@@ -223,7 +229,7 @@ export class Collector {
         await this.updateJob('rate_limited', 'waiting_for_github');
         await this.event('warning', 'github_rate_limited', 'GitHub rate limit reached', { resumeAt: error.resetAt.toISOString() });
         await sleep(wait);
-        await this.updateJob('running', 'resuming');
+        await this.resumeAfterRateLimit();
       }
     }
   }
@@ -245,6 +251,19 @@ export class Collector {
       `${this.jobId}:${randomUUID()}`
     );
     if (Number(result) === 0) throw new Error(`${prefix} rolling 24-hour limit reached`);
+  }
+
+  private async resumeAfterRateLimit() {
+    if (await this.waitForRunnableState() === 'cancelled') throw new JobCancelledError();
+    await this.updateJob('running', 'resuming');
+  }
+
+  private async finishCancelled() {
+    await this.db.query(
+      `UPDATE collection_jobs SET status = 'cancelled', phase = 'cancelled', completed_at = now(), updated_at = now() WHERE id = $1`,
+      [this.jobId]
+    );
+    await this.event('info', 'job_cancelled', 'Job cancelled');
   }
 
   private async checkpoint(login: string) {
