@@ -266,7 +266,7 @@ export class EmailCampaignsService {
 }
 
 function deliveryDelay(index: number, alreadySentThisHour: number) {
-  const hourly = Math.max(1, Number(process.env.EMAIL_SEND_HOURLY_LIMIT ?? 20));
+  const hourly = Math.max(1, Number(process.env.EMAIL_SEND_HOURLY_LIMIT ?? 25));
   const delay = Math.max(1, Number(process.env.EMAIL_SEND_DELAY_SECONDS ?? 5)) * 1_000;
   const position = index + alreadySentThisHour;
   return Math.floor(position / hourly) * 3_600_000 + (position % hourly) * delay;

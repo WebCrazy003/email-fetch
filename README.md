@@ -36,7 +36,7 @@ The local application can send immediate, plain-text campaigns through one conne
 6. Open **Settings** and connect Gmail, then create a plain-text template under **Templates**.
 7. Add or remove approved test recipients under **Settings**, then select individual addresses or all active addresses on the current **Emails** page, choose a template, review the immutable preview, and confirm automatic sending.
 
-Refresh tokens are encrypted with AES-256-GCM before being stored. The encryption key and OAuth client secret must remain in the ignored `.env` file. The default safety policy allows one active campaign, blocks repeat contact, limits sends to 100 per rolling day and 20 per hour, and spaces Gmail submissions by at least five seconds. Every message includes a reply-based opt-out instruction; opt-outs are applied manually with the suppress action on the Emails page.
+Refresh tokens are encrypted with AES-256-GCM before being stored. The encryption key and OAuth client secret must remain in the ignored `.env` file. The default safety policy allows one active campaign, blocks repeat contact, limits sends to 100 per rolling day and 25 per hour, and spaces Gmail submissions by at least five seconds. Every message includes a reply-based opt-out instruction; opt-outs are applied manually with the suppress action on the Emails page.
 
 ## Specifications
 

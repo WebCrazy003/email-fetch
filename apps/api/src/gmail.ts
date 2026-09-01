@@ -94,7 +94,11 @@ export class GmailService {
       ),
       connected: connection?.status === 'active',
       connection: connection ?? null,
-      limits: { daily: 100, hourly: 20, minimumDelaySeconds: 5 },
+      limits: {
+        daily: Math.max(1, Number(process.env.EMAIL_SEND_DAILY_LIMIT ?? 100)),
+        hourly: Math.max(1, Number(process.env.EMAIL_SEND_HOURLY_LIMIT ?? 25)),
+        minimumDelaySeconds: Math.max(1, Number(process.env.EMAIL_SEND_DELAY_SECONDS ?? 5))
+      },
       testRecipientConfigured: testRecipients.length > 0,
       testRecipients,
       fixedTestRecipients
