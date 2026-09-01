@@ -263,6 +263,11 @@ CREATE TABLE IF NOT EXISTS email_provider_connections (
   disconnected_at timestamptz
 );
 
+CREATE TABLE IF NOT EXISTS email_test_recipients (
+  normalized_email text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS email_campaigns (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,

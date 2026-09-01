@@ -19,15 +19,19 @@ export function NewCampaign() {
     queryKey: ['campaign-preview', emailIds], queryFn: () => api<CampaignPreview>('/email-campaigns/selections', { method: 'POST', body: JSON.stringify({ emailIds }) }), enabled: emailIds.length > 0
   });
   const [templateId, setTemplateId] = useState(''); const [name, setName] = useState('');
-  const [senderName, setSenderName] = useState('Richard Wang'); const [replyTo, setReplyTo] = useState('');
+  const [senderName, setSenderName] = useState('Richard Wang'); const [replyTo, setReplyTo] = useState(''); const [testRecipient, setTestRecipient] = useState('');
   useEffect(() => { if (!templateId && templates.data?.[0]) setTemplateId(templates.data[0].id); }, [templateId, templates.data]);
   useEffect(() => { const template = templates.data?.find((item) => item.id === templateId); if (template && !name) setName(`${template.name} · ${new Date().toLocaleDateString()}`); }, [name, templateId, templates.data]);
+  useEffect(() => {
+    const recipients = gmail.data?.testRecipients ?? [];
+    if (!recipients.includes(testRecipient)) setTestRecipient(recipients[0] ?? '');
+  }, [gmail.data?.testRecipients, testRecipient]);
   const create = useMutation({
     mutationFn: () => api<EmailCampaign>('/email-campaigns', { method: 'POST', body: JSON.stringify({ emailIds, templateId, name, senderName, replyTo, purpose: 'direct_outreach' }) }),
     onSuccess: (campaign) => navigate(`/campaigns/${campaign.id}`, { replace: true })
   });
   const test = useMutation({
-    mutationFn: () => api('/email-providers/gmail/test', { method: 'POST', body: JSON.stringify({ templateId, senderName, replyTo }) })
+    mutationFn: () => api<{ recipient: string }>('/email-providers/gmail/test', { method: 'POST', body: JSON.stringify({ templateId, senderName, replyTo, recipient: testRecipient }) })
   });
   if (!emailIds.length) return <><PageHeader eyebrow="Email campaign" title="No recipients selected" description="Select email addresses before creating a campaign." />
     <section className="panel empty"><Mail size={28} /><strong>Select emails first</strong><Link className="button primary" to="/emails">Open Emails</Link></section></>;
@@ -39,7 +43,7 @@ export function NewCampaign() {
   const submit = (event: FormEvent) => { event.preventDefault(); create.mutate(); };
   return <><PageHeader eyebrow="Automatic Gmail sending" title="Review campaign" description="Choose a template and confirm the immutable message snapshot." />
     {!gmail.data!.connected && <ErrorBox error={new Error('Connect a Gmail sender account in Settings before sending.')} />}{(create.error || test.error) && <ErrorBox error={create.error ?? test.error} />}
-    {test.isSuccess && <div className="success-box">Test email accepted by Gmail for the configured test recipient.</div>}
+    {test.isSuccess && <div className="success-box">Test email accepted by Gmail for {test.data.recipient}.</div>}
     <form className="campaign-layout" onSubmit={submit}><div className="form-main"><section className="panel form-section"><div className="section-title"><span>1</span><div><h2>Recipients</h2><p>Selected directly from the Emails page.</p></div></div>
       <div className="campaign-summary"><div><span>Selected</span><strong>{preview.data!.selected}</strong></div><div><span>Eligible</span><strong>{preview.data!.eligible}</strong></div><div><span>Excluded</span><strong>{preview.data!.excluded}</strong></div></div>
       {preview.data!.excluded > 0 && <div className="limit-note"><AlertTriangle size={14} />Suppressed, inactive, invalid, or previously contacted addresses will not be sent.</div>}</section>
@@ -52,7 +56,8 @@ export function NewCampaign() {
         {selectedTemplate ? <div className="message-preview"><strong>{render(selectedTemplate.subject, merge)}</strong><pre>{`${render(selectedTemplate.body_text, merge)}\n\n--\n${senderName}\nTo opt out of future emails, reply with "unsubscribe".`}</pre></div> : <Empty title="Choose a template" />}</section></div>
       <aside className="form-side"><section className="panel sticky-card"><div className="summary-icon"><Send size={18} /></div><h2>Send automatically</h2><p>From {gmail.data!.connection?.account_address ?? 'no connected account'}. The browser may be closed after confirmation.</p>
         <div className="limit-note">100/day · 20/hour · at least 5 seconds apart · repeat contact blocked</div>
-        <button type="button" className="button wide" disabled={!gmail.data!.connected || !selectedTemplate || !gmail.data!.testRecipientConfigured || test.isPending} onClick={() => test.mutate()}>{test.isPending ? 'Sending test…' : 'Send test email'}</button>
+        <label className="field">Test recipient<select value={testRecipient} onChange={(event) => setTestRecipient(event.target.value)}><option value="">Add a recipient in Settings</option>{gmail.data!.testRecipients.map((email) => <option value={email} key={email}>{email}</option>)}</select></label>
+        <button type="button" className="button wide" disabled={!gmail.data!.connected || !selectedTemplate || !testRecipient || test.isPending} onClick={() => test.mutate()}>{test.isPending ? 'Sending test…' : 'Send test email'}</button>
         <button className="button primary wide" disabled={!gmail.data!.connected || !selectedTemplate || preview.data!.eligible === 0 || create.isPending}>{create.isPending ? 'Queueing…' : `Send to ${preview.data!.eligible}`}</button>
         <Link className="button wide" to="/emails">Cancel</Link></section></aside></form>
   </>;

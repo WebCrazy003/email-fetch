@@ -81,6 +81,16 @@ export class RecordsService {
     const filter: SqlFilter = { clauses: [], values: [] };
     if (query.q) add(filter, `e.normalized_email ILIKE ?`, `%${query.q}%`);
     if (query.domain) add(filter, `split_part(e.normalized_email, '@', 2) ILIKE ?`, `%${query.domain}%`);
+    if (query.country === 'not_specified') filter.clauses.push(`NOT EXISTS (
+      SELECT 1 FROM person_email_addresses pe
+      JOIN source_accounts sa ON sa.person_id = pe.person_id
+      WHERE pe.normalized_email = e.normalized_email AND NULLIF(BTRIM(sa.location), '') IS NOT NULL
+    )`);
+    else if (query.country) add(filter, `EXISTS (
+      SELECT 1 FROM person_email_addresses pe
+      JOIN source_accounts sa ON sa.person_id = pe.person_id
+      WHERE pe.normalized_email = e.normalized_email AND sa.location ILIKE ?
+    )`, `%${query.country}%`);
     if (query.status) add(filter, `e.status = ?`, query.status);
     if (query.confidence) add(filter, `e.highest_confidence = ?`, query.confidence);
     if (query.discoveryType) add(filter, `e.best_discovery_type = ?`, query.discoveryType);

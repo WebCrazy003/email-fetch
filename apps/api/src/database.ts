@@ -50,6 +50,9 @@ export class Database implements OnModuleInit, OnModuleDestroy {
         last_health_check_at timestamptz, last_error text, connected_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now(), disconnected_at timestamptz
       );
+      CREATE TABLE IF NOT EXISTS email_test_recipients (
+        normalized_email text PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now()
+      );
       CREATE TABLE IF NOT EXISTS email_campaigns (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL,
         template_id uuid REFERENCES email_templates(id) ON DELETE SET NULL, template_revision integer NOT NULL,

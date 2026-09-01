@@ -88,6 +88,7 @@ export type UserQuery = z.infer<typeof userQuerySchema>;
 export const emailQuerySchema = z.object({
   q: z.string().trim().max(200).optional(),
   domain: z.string().trim().max(255).optional(),
+  country: z.string().trim().max(120).optional(),
   status: z.enum(['active', 'no_longer_public', 'invalid', 'suppressed', 'deleted']).optional(),
   confidence: confidenceSchema.optional(),
   discoveryType: discoveryTypeSchema.optional(),
@@ -132,7 +133,12 @@ export type CreateEmailCampaignInput = z.infer<typeof createEmailCampaignSchema>
 export const campaignTestSchema = z.object({
   templateId: z.string().uuid(),
   senderName: safeHeader.max(120).default('Richard Wang'),
-  replyTo: z.union([z.string().trim().email(), z.literal('')]).optional().default('')
+  replyTo: z.union([z.string().trim().email(), z.literal('')]).optional().default(''),
+  recipient: z.string().trim().email().transform(normalizeEmail).optional()
+});
+
+export const testEmailRecipientSchema = z.object({
+  email: z.string().trim().email().transform(normalizeEmail)
 });
 
 export function normalizeEmail(value: string): string {

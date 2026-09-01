@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderTemplate, templateVariables, validateTemplateVariables, withRequiredFooter } from './email-templates.js';
-import { createMimeMessage, decryptCredential, encryptCredential } from './gmail.js';
+import { createMimeMessage, decryptCredential, encryptCredential, parseTestRecipients } from './gmail.js';
 
 describe('email template rendering', () => {
   it('renders only the approved recipient fields', () => {
@@ -37,5 +37,14 @@ describe('plain-text MIME creation', () => {
     expect(message).toContain('Message-ID: <recipient-task-id@email-fetch.local>');
     expect(message).toContain('Content-Type: text/plain; charset=UTF-8');
     expect(message).toContain('Line one\r\nLine two');
+  });
+});
+
+describe('test recipient configuration', () => {
+  it('combines, normalizes, and deduplicates recipient lists', () => {
+    expect(parseTestRecipients(
+      ' First@Example.com, second@example.com ',
+      'first@example.com;third@example.com\nfourth@example.com'
+    )).toEqual(['first@example.com', 'second@example.com', 'third@example.com', 'fourth@example.com']);
   });
 });

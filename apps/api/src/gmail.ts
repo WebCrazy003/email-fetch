@@ -1,5 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Injectable, Post, Query, Res } from '@nestjs/common';
-import { campaignTestSchema } from '@email-fetch/shared';
+import { BadRequestException, Body, Controller, Delete, Get, Injectable, Param, Post, Query, Res } from '@nestjs/common';
+import { campaignTestSchema, normalizeEmail, testEmailRecipientSchema } from '@email-fetch/shared';
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 import { Database } from './database.js';
@@ -30,6 +30,14 @@ type TokenResponse = {
 
 export class GmailProviderError extends Error {
   constructor(message: string, readonly transient: boolean, readonly status?: number) { super(message); }
+}
+
+export function parseTestRecipients(...values: Array<string | undefined>): string[] {
+  return [...new Set(values
+    .flatMap((value) => value?.split(/[,;\n]/) ?? [])
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map(normalizeEmail))];
 }
 
 export function encryptCredential(value: string, encodedKey = process.env.GMAIL_TOKEN_ENCRYPTION_KEY): string {
@@ -72,10 +80,11 @@ export class GmailService {
   ) {}
 
   async status() {
-    const result = await this.db.query(
+    const fixedTestRecipients = this.environmentTestRecipients();
+    const [result, testRecipients] = await Promise.all([this.db.query(
       `SELECT id, account_address, display_label, granted_scopes, status, connected_at, updated_at,
         last_health_check_at, last_error FROM email_provider_connections WHERE provider_key = 'gmail'`
-    );
+    ), this.configuredTestRecipients()]);
     const connection = result.rows[0];
     return {
       configured: Boolean(
@@ -86,7 +95,9 @@ export class GmailService {
       connected: connection?.status === 'active',
       connection: connection ?? null,
       limits: { daily: 100, hourly: 20, minimumDelaySeconds: 5 },
-      testRecipientConfigured: Boolean(process.env.GMAIL_TEST_RECIPIENT)
+      testRecipientConfigured: testRecipients.length > 0,
+      testRecipients,
+      fixedTestRecipients
     };
   }
 
@@ -155,9 +166,11 @@ export class GmailService {
     return { connected: false };
   }
 
-  async test(input: { templateId: string; senderName: string; replyTo: string }) {
-    const recipient = process.env.GMAIL_TEST_RECIPIENT;
-    if (!recipient) throw new BadRequestException('GMAIL_TEST_RECIPIENT is not configured');
+  async test(input: { templateId: string; senderName: string; replyTo: string; recipient?: string }) {
+    const testRecipients = await this.configuredTestRecipients();
+    if (!testRecipients.length) throw new BadRequestException('No test email recipient is configured');
+    const recipient = input.recipient ?? testRecipients[0]!;
+    if (!testRecipients.includes(recipient)) throw new BadRequestException('The selected address is not an approved test recipient');
     const template = await this.templates.get(input.templateId, true) as { subject: string; body_text: string };
     const data = { name: 'Test recipient', username: 'test-recipient', email: recipient };
     const result = await this.send({
@@ -169,6 +182,32 @@ export class GmailService {
     });
     await this.audit('gmail_test_sent', recipient, { providerMessageId: result.id, templateId: input.templateId });
     return { sent: true, recipient, providerMessageId: result.id };
+  }
+
+  async addTestRecipient(input: { email: string }) {
+    if (this.environmentTestRecipients().includes(input.email)) {
+      throw new BadRequestException('This test recipient is already configured through the environment');
+    }
+    const result = await this.db.query<{ normalized_email: string }>(
+      `INSERT INTO email_test_recipients (normalized_email) VALUES ($1)
+       ON CONFLICT (normalized_email) DO NOTHING RETURNING normalized_email`,
+      [input.email]
+    );
+    if (result.rows[0]) await this.audit('gmail_test_recipient_added', input.email);
+    return this.status();
+  }
+
+  async removeTestRecipient(email: string) {
+    if (this.environmentTestRecipients().includes(email)) {
+      throw new BadRequestException('Recipients configured through the environment must be removed from .env');
+    }
+    const result = await this.db.query<{ normalized_email: string }>(
+      `DELETE FROM email_test_recipients WHERE normalized_email = $1 RETURNING normalized_email`,
+      [email]
+    );
+    if (!result.rows[0]) throw new BadRequestException('Test recipient was not found');
+    await this.audit('gmail_test_recipient_removed', email);
+    return this.status();
   }
 
   async activeConnection(): Promise<ProviderConnection> {
@@ -230,6 +269,17 @@ export class GmailService {
       throw new GmailProviderError(tokens.error_description ?? tokens.error ?? 'Gmail authorization expired', false);
     }
     return tokens.access_token;
+  }
+
+  private environmentTestRecipients() {
+    return parseTestRecipients(process.env.GMAIL_TEST_RECIPIENTS, process.env.GMAIL_TEST_RECIPIENT);
+  }
+
+  private async configuredTestRecipients() {
+    const result = await this.db.query<{ normalized_email: string }>(
+      `SELECT normalized_email FROM email_test_recipients ORDER BY created_at, normalized_email`
+    );
+    return [...new Set([...this.environmentTestRecipients(), ...result.rows.map((row) => row.normalized_email)])];
   }
 
   private audit(action: string, targetId?: string, metadata: unknown = {}) {
@@ -307,6 +357,15 @@ export class GmailController {
 
   @Post('gmail/test')
   test(@Body() body: unknown) { return this.gmail.test(parseWith(campaignTestSchema, body)); }
+
+  @Post('gmail/test-recipients')
+  addTestRecipient(@Body() body: unknown) { return this.gmail.addTestRecipient(parseWith(testEmailRecipientSchema, body)); }
+
+  @Delete('gmail/test-recipients/:recipient')
+  removeTestRecipient(@Param('recipient') recipient: string) {
+    const input = parseWith(testEmailRecipientSchema, { email: recipient });
+    return this.gmail.removeTestRecipient(input.email);
+  }
 
   @Post('gmail/disconnect')
   disconnect() { return this.gmail.disconnect(); }

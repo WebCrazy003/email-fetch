@@ -4,19 +4,20 @@ import { Ban, Copy, Search, Send } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, queryString } from '../api.js';
 import { Badge, Empty, ErrorBox, Loading, PageHeader, Pager, StatusBadge } from '../components.js';
+import { countries } from '../countries.js';
 import type { EmailRecord, Page } from '../types.js';
 
 export function EmailsPage() {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [params, setParams] = useSearchParams();
-  const page = Number(params.get('page') ?? 1); const q = params.get('q') ?? ''; const domain = params.get('domain') ?? '';
+  const page = Number(params.get('page') ?? 1); const q = params.get('q') ?? ''; const domain = params.get('domain') ?? ''; const country = params.get('country') ?? '';
   const status = params.get('status') ?? ''; const confidence = params.get('confidence') ?? '';
   const discoveryType = params.get('discoveryType') ?? ''; const sendStatus = params.get('sendStatus') ?? '';
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectAllRef = useRef<HTMLInputElement>(null);
-  const url = useMemo(() => `/emails?${queryString({ q, domain, status, confidence, discoveryType, sendStatus, page, pageSize: 25 })}`,
-    [q, domain, status, confidence, discoveryType, sendStatus, page]);
+  const url = useMemo(() => `/emails?${queryString({ q, domain, country, status, confidence, discoveryType, sendStatus, page, pageSize: 25 })}`,
+    [q, domain, country, status, confidence, discoveryType, sendStatus, page]);
   const query = useQuery({ queryKey: ['emails', url], queryFn: () => api<Page<EmailRecord>>(url) });
   const suppress = useMutation({
     mutationFn: (email: string) => api('/email-suppressions', { method: 'POST', body: JSON.stringify({ email, reason: 'Manual opt-out' }) }),
@@ -41,6 +42,7 @@ export function EmailsPage() {
     {suppress.error && <ErrorBox error={suppress.error} />}
     <section className="panel"><div className="filters"><label className="search-input"><Search size={16} /><input value={q} onChange={(e) => patch('q', e.target.value)} placeholder="Search email or domain" /></label>
       <input value={domain} onChange={(e) => patch('domain', e.target.value)} placeholder="Domain" />
+      <select value={country} onChange={(e) => patch('country', e.target.value)} aria-label="Country"><option value="">All</option><option value="not_specified">Not specified</option>{countries.map((name) => <option key={name} value={name}>{name}</option>)}</select>
       <select value={status} onChange={(e) => patch('status', e.target.value)}><option value="">Any status</option><option value="active">Active</option><option value="no_longer_public">No longer public</option><option value="invalid">Invalid</option><option value="suppressed">Suppressed</option></select>
       <select value={confidence} onChange={(e) => patch('confidence', e.target.value)}><option value="">All confidence</option><option value="confirmed">Confirmed</option><option value="likely">Likely</option><option value="unsure">Unsure</option></select>
       <select value={discoveryType} onChange={(e) => patch('discoveryType', e.target.value)}><option value="">Any discovery</option><option value="source_profile">GitHub profile</option><option value="linked_website">Linked website</option><option value="guessed">Guessed</option></select>

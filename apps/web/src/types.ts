@@ -28,6 +28,7 @@ export interface EmailTemplate {
 }
 export interface GmailStatus {
   configured: boolean; connected: boolean; testRecipientConfigured: boolean;
+  testRecipients: string[]; fixedTestRecipients: string[];
   connection?: { id: string; account_address: string; display_label?: string; status: string; connected_at: string; last_health_check_at?: string; last_error?: string } | null;
   limits: { daily: number; hourly: number; minimumDelaySeconds: number };
 }
