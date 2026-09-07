@@ -2,7 +2,7 @@
 
 A local, single-operator application for saving GitHub user filters, running them as background jobs, gathering public contact details from approved sources, reviewing email confidence, and managing the resulting records. The React interface is backed by a NestJS API, a BullMQ worker, PostgreSQL, and Redis.
 
-The MVP has no application login, bulk export, or automatic retention expiry. It only uses the GitHub API, public email on a GitHub profile, and up to five pages on the website explicitly linked from that profile. Guessed addresses are visibly marked as unsure.
+The MVP has no application login, bulk export, or automatic retention expiry. Collection uses the GitHub API, public email on a GitHub profile, and up to five pages on the website explicitly linked from that profile. Users can also be imported from external JSON. Guessed and newly imported addresses are visibly marked as unsure.
 
 ## Run locally
 
@@ -23,6 +23,35 @@ Run infrastructure with `docker compose up -d postgres redis`, install dependenc
 - `npm run build` creates production builds for all workspaces.
 
 The database schema is initialized from `infra/postgres/init.sql` when the PostgreSQL volume is first created.
+
+## Import users from JSON
+
+Open **Users → Import JSON**, upload a `.json` file or paste JSON, then click **Import users**. The API also accepts the same JSON at `POST /api/users/import` with `Content-Type: application/json`.
+
+Use one object or an array of up to 1,000 objects (maximum 1 MB):
+
+```json
+[
+  {
+    "name": "Jane Doe",
+    "email": "jane@example.com",
+    "country": "Poland",
+    "extra_info": "Frontend developer",
+    "fetch_source": "github_hire_me",
+    "fetch_page_link": "https://github.com/janedoe"
+  }
+]
+```
+
+`name`, `email`, and `country` are required strings; name and country may be empty. Email must be valid. The other fields are optional: `extra_info` and `fetch_page_link` default to empty strings, and `fetch_source` defaults to `github_hire_me`. Links must use HTTP or HTTPS. JSON uses quoted keys and colons, not equals signs.
+
+The entire batch is validated before saving and saved in one transaction. The result reports `total`, `created`, `updated`, and `skipped` counts. Emails already in the database are skipped, including GitHub contacts, manual contacts, earlier imports, and duplicates within the same file, regardless of `fetch_source`. Email addresses are trimmed and lowercased for matching. Duplicate rows do not create users or change existing user details, email metadata, or sending history. The database's unique email constraint also prevents concurrent inserts from creating duplicate imported users. `updated` only applies when restoring a missing email link on an existing imported account.
+
+Country is stored as the account location for existing filters. Extra info and the source link appear on the Users page. Imported email evidence is labeled `imported` with `unsure` confidence and is not marked publicly verified. Existing email confidence, status, and sending history are preserved. Suppressed people, email addresses, domains, and imported accounts, as well as invalid or deleted email records, are skipped.
+
+Restart the API after updating; its startup migration adds the imported discovery type to existing databases without recreating the volume.
+
+On **Emails**, the Country filter lists the distinct countries found across stored users, and the Country column shows the countries linked to each email. Imported country fields take precedence; GitHub locations with an explicit country (for example, `Warsaw, Poland`) are recognized, including common aliases such as `USA`. **None** selects emails without a recognized country, including blank, city-only, and ambiguous locations. Options come from the full user list rather than the current email page or a fixed dropdown list.
 
 ## Gmail sending
 

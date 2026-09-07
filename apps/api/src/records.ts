@@ -3,8 +3,18 @@ import { createEmailSchema, emailQuerySchema, normalizeEmail, userQuerySchema, t
 import { z } from 'zod';
 import { Database } from './database.js';
 import { parseWith } from './http.js';
+import { resolveCountry } from './countries.js';
 
 type SqlFilter = { clauses: string[]; values: unknown[] };
+
+// An explicitly supplied import country takes precedence over free-text location.
+const accountCountryValue = `BTRIM(CASE WHEN sa.attributes_json ? 'country' THEN sa.attributes_json->>'country' ELSE sa.location END)`;
+const countryAccountsCte = `WITH account_countries AS (
+  SELECT DISTINCT sa.person_id, mapped.country
+  FROM source_accounts sa JOIN people p ON p.id = sa.person_id
+  JOIN jsonb_to_recordset($1::jsonb) AS mapped(value text, country text) ON mapped.value = ${accountCountryValue}
+  WHERE p.lifecycle_status <> 'deleted'
+)`;
 
 function add(filter: SqlFilter, expression: string, value: unknown) {
   filter.values.push(value);
@@ -14,6 +24,21 @@ function add(filter: SqlFilter, expression: string, value: unknown) {
 @Injectable()
 export class RecordsService {
   constructor(private readonly db: Database) {}
+
+  private async countryValues() {
+    const values = await this.db.query<{ value: string | null }>(
+      `SELECT DISTINCT ${accountCountryValue} AS value FROM source_accounts sa
+       JOIN people p ON p.id = sa.person_id WHERE p.lifecycle_status <> 'deleted'`
+    );
+    return values.rows.flatMap(({ value }) => {
+      const country = resolveCountry(value);
+      return country ? [{ value, country }] : [];
+    });
+  }
+
+  async listCountries() {
+    return [...new Set((await this.countryValues()).map(({ country }) => country))].sort((a, b) => a.localeCompare(b));
+  }
 
   async listUsers(query: UserQuery) {
     const filter: SqlFilter = { clauses: [`p.lifecycle_status <> 'deleted'`], values: [] };
@@ -37,6 +62,8 @@ export class RecordsService {
       `SELECT p.id AS person_id, p.preferred_display_name, p.is_suppressed, p.first_seen_at,
         sa.id AS source_account_id, sa.username, sa.display_name, sa.profile_url, sa.avatar_url,
         sa.bio, sa.company, sa.location, sa.blog_url, sa.followers, sa.public_repos, sa.last_checked_at,
+        s.source_key, sa.attributes_json->>'country' AS country, sa.attributes_json->>'extra_info' AS extra_info,
+        sa.attributes_json->>'fetch_source' AS fetch_source, sa.attributes_json->>'fetch_page_link' AS fetch_page_link,
         COALESCE((SELECT json_agg(json_build_object(
           'email', e.normalized_email, 'originalEmail', e.original_email, 'status', e.status,
           'confidence', e.highest_confidence, 'discoveryType', e.best_discovery_type,
@@ -44,14 +71,14 @@ export class RecordsService {
         ) ORDER BY e.normalized_email)
         FROM person_email_addresses pe JOIN email_addresses e ON e.normalized_email = pe.normalized_email
         WHERE pe.person_id = p.id), '[]'::json) AS emails
-       FROM people p JOIN source_accounts sa ON sa.person_id = p.id
+       FROM people p JOIN source_accounts sa ON sa.person_id = p.id JOIN sources s ON s.id = sa.source_id
        ${where}
        ORDER BY ${sortMap[query.sort]} ${query.order.toUpperCase()} NULLS LAST
        LIMIT $${filter.values.length + 1} OFFSET $${filter.values.length + 2}`,
       listValues
     );
     const count = await this.db.query<{ count: string }>(
-      `SELECT count(*)::text AS count FROM people p JOIN source_accounts sa ON sa.person_id = p.id ${where}`,
+      `SELECT count(*)::text AS count FROM people p JOIN source_accounts sa ON sa.person_id = p.id JOIN sources s ON s.id = sa.source_id ${where}`,
       filter.values
     );
     const total = Number(count.rows[0]!.count);
@@ -63,7 +90,8 @@ export class RecordsService {
       `SELECT p.*, COALESCE(json_agg(DISTINCT jsonb_build_object(
         'id', sa.id, 'username', sa.username, 'displayName', sa.display_name, 'profileUrl', sa.profile_url,
         'bio', sa.bio, 'company', sa.company, 'location', sa.location, 'blogUrl', sa.blog_url,
-        'followers', sa.followers, 'publicRepos', sa.public_repos, 'lastCheckedAt', sa.last_checked_at
+        'followers', sa.followers, 'publicRepos', sa.public_repos, 'lastCheckedAt', sa.last_checked_at,
+        'attributes', sa.attributes_json
       )) FILTER (WHERE sa.id IS NOT NULL), '[]') AS accounts,
       COALESCE((SELECT json_agg(json_build_object('email', e.normalized_email, 'originalEmail', e.original_email,
         'status', e.status, 'confidence', e.highest_confidence, 'discoveryType', e.best_discovery_type,
@@ -78,19 +106,19 @@ export class RecordsService {
   }
 
   async listEmails(query: EmailQuery) {
-    const filter: SqlFilter = { clauses: [], values: [] };
+    const filter: SqlFilter = { clauses: [], values: [JSON.stringify(await this.countryValues())] };
     if (query.q) add(filter, `e.normalized_email ILIKE ?`, `%${query.q}%`);
     if (query.domain) add(filter, `split_part(e.normalized_email, '@', 2) ILIKE ?`, `%${query.domain}%`);
     if (query.country === 'not_specified') filter.clauses.push(`NOT EXISTS (
       SELECT 1 FROM person_email_addresses pe
-      JOIN source_accounts sa ON sa.person_id = pe.person_id
-      WHERE pe.normalized_email = e.normalized_email AND NULLIF(BTRIM(sa.location), '') IS NOT NULL
+      JOIN account_countries ac ON ac.person_id = pe.person_id
+      WHERE pe.normalized_email = e.normalized_email
     )`);
     else if (query.country) add(filter, `EXISTS (
       SELECT 1 FROM person_email_addresses pe
-      JOIN source_accounts sa ON sa.person_id = pe.person_id
-      WHERE pe.normalized_email = e.normalized_email AND sa.location ILIKE ?
-    )`, `%${query.country}%`);
+      JOIN account_countries ac ON ac.person_id = pe.person_id
+      WHERE pe.normalized_email = e.normalized_email AND lower(ac.country) = lower(?)
+    )`, query.country);
     if (query.status) add(filter, `e.status = ?`, query.status);
     if (query.confidence) add(filter, `e.highest_confidence = ?`, query.confidence);
     if (query.discoveryType) add(filter, `e.best_discovery_type = ?`, query.discoveryType);
@@ -102,7 +130,11 @@ export class RecordsService {
     const sortMap = { email: 'e.normalized_email', first_seen: 'e.first_seen_at', last_seen: 'e.last_seen_at', last_sent: 'e.last_sent_at' } as const;
     const offset = (query.page - 1) * query.pageSize;
     const rows = await this.db.query(
-      `SELECT e.*, split_part(e.normalized_email, '@', 2) AS domain,
+      `${countryAccountsCte}
+       SELECT e.*, split_part(e.normalized_email, '@', 2) AS domain,
+        ARRAY(SELECT DISTINCT ac.country FROM person_email_addresses pe
+          JOIN account_countries ac ON ac.person_id = pe.person_id
+          WHERE pe.normalized_email = e.normalized_email ORDER BY ac.country) AS countries,
         (SELECT count(*)::int FROM person_email_addresses pe WHERE pe.normalized_email = e.normalized_email) AS person_count,
         COALESCE((SELECT json_agg(json_build_object('id', p.id, 'name', p.preferred_display_name, 'username', sa.username))
           FROM person_email_addresses pe JOIN people p ON p.id = pe.person_id
@@ -113,7 +145,7 @@ export class RecordsService {
        LIMIT $${filter.values.length + 1} OFFSET $${filter.values.length + 2}`,
       [...filter.values, query.pageSize, offset]
     );
-    const count = await this.db.query<{ count: string }>(`SELECT count(*)::text AS count FROM email_addresses e ${where}`, filter.values);
+    const count = await this.db.query<{ count: string }>(`${countryAccountsCte} SELECT count(*)::text AS count FROM email_addresses e ${where}`, filter.values);
     const total = Number(count.rows[0]!.count);
     return { items: rows.rows, page: query.page, pageSize: query.pageSize, total };
   }
@@ -198,6 +230,9 @@ export class RecordsController {
 
   @Get('users')
   users(@Query() query: unknown) { return this.records.listUsers(parseWith(userQuerySchema, query)); }
+
+  @Get('users/countries')
+  countries() { return this.records.listCountries(); }
 
   @Get('users/:id')
   user(@Param('id') id: string) { return this.records.getUser(id); }

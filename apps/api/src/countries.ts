@@ -197,3 +197,21 @@ export const countries = [
   'Zambia',
   'Zimbabwe'
 ] as const;
+
+const names = new Map<string, string>(countries.map((country) => [country.toLowerCase(), country]));
+for (const [alias, country] of Object.entries({
+  usa: 'United States', us: 'United States', 'u.s.': 'United States', 'u.s.a.': 'United States', 'united states of america': 'United States',
+  uk: 'United Kingdom', 'u.k.': 'United Kingdom', england: 'United Kingdom', scotland: 'United Kingdom', wales: 'United Kingdom', 'northern ireland': 'United Kingdom',
+  uae: 'United Arab Emirates', 'czech republic': 'Czechia', 'türkiye': 'Turkey', 'viet nam': 'Vietnam', 'republic of korea': 'South Korea', 'cape verde': 'Cabo Verde'
+})) names.set(alias, country);
+
+// Only explicit country names or aliases qualify. City-only and ambiguous
+// locations remain unknown instead of guessing from city names or email domains.
+export function resolveCountry(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  const exact = names.get(normalized);
+  if (exact) return exact;
+  const matches = new Set(normalized.split(/[,;|/()\n]+/).map((part) => names.get(part.trim())).filter((country): country is string => !!country));
+  return matches.size === 1 ? [...matches][0]! : null;
+}

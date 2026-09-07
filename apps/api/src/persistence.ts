@@ -26,7 +26,7 @@ export interface PersistResult {
 }
 
 const confidenceRank: Record<Confidence, number> = { unsure: 1, likely: 2, confirmed: 3 };
-const discoveryRank: Record<DiscoveryType, number> = { guessed: 1, linked_website: 2, source_profile: 3 };
+const discoveryRank: Record<DiscoveryType, number> = { imported: 0, guessed: 1, linked_website: 2, source_profile: 3 };
 
 function profileFields(profile: GitHubProfile): Array<[string, unknown]> {
   const fields: Array<[string, unknown]> = [

@@ -15,6 +15,23 @@ export class Database implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     await this.pool.query(`
+      DO $import_migration$
+      BEGIN
+        PERFORM pg_advisory_xact_lock(hashtext('external_json_schema'));
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'email_addresses_best_discovery_type_check'
+          AND pg_get_constraintdef(oid) NOT LIKE '%imported%') THEN
+          ALTER TABLE email_addresses DROP CONSTRAINT email_addresses_best_discovery_type_check;
+          ALTER TABLE email_addresses ADD CONSTRAINT email_addresses_best_discovery_type_check
+            CHECK (best_discovery_type IN ('source_profile', 'linked_website', 'guessed', 'imported'));
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'email_sources_discovery_type_check'
+          AND pg_get_constraintdef(oid) NOT LIKE '%imported%') THEN
+          ALTER TABLE email_sources DROP CONSTRAINT email_sources_discovery_type_check;
+          ALTER TABLE email_sources ADD CONSTRAINT email_sources_discovery_type_check
+            CHECK (discovery_type IN ('source_profile', 'linked_website', 'guessed', 'imported'));
+        END IF;
+      END
+      $import_migration$;
       CREATE TABLE IF NOT EXISTS saved_filters (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         name text NOT NULL,

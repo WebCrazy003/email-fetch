@@ -1,5 +1,6 @@
 export interface Page<T> { items: T[]; page: number; pageSize: number; total: number }
 export interface EmailRecord {
+  countries: string[];
   normalized_email: string; original_email: string; status: string; highest_confidence: string;
   best_discovery_type: string; successful_send_count: number; last_sent_at?: string; last_seen_at: string;
   last_sent_campaign_id?: string; last_send_attempt_status?: string; last_send_attempt_at?: string;
@@ -7,6 +8,7 @@ export interface EmailRecord {
 }
 export interface UserRecord {
   person_id: string; source_account_id: string; username: string; display_name?: string; preferred_display_name?: string;
+  source_key: string; country?: string; extra_info?: string; fetch_source?: string; fetch_page_link?: string;
   profile_url: string; avatar_url?: string; bio?: string; company?: string; location?: string; followers?: number;
   public_repos?: number; last_checked_at: string; is_suppressed: boolean;
   emails: Array<{ email: string; originalEmail: string; status: string; confidence: string; discoveryType: string; successfulSendCount: number; lastSentAt?: string }>;

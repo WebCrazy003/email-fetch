@@ -8,9 +8,10 @@ import { SystemController } from './system.js';
 import { EmailTemplatesController, EmailTemplatesService } from './email-templates.js';
 import { GmailController, GmailService } from './gmail.js';
 import { EmailCampaignsController, EmailCampaignsService } from './email-campaigns.js';
+import { UserImportController, UserImportService } from './user-import.js';
 
 @Module({
-  controllers: [FiltersController, JobsController, RecordsController, SystemController, EmailTemplatesController, GmailController, EmailCampaignsController],
-  providers: [Database, FiltersService, QueueService, JobsService, RecordsService, EmailTemplatesService, GmailService, EmailCampaignsService]
+  controllers: [FiltersController, JobsController, RecordsController, UserImportController, SystemController, EmailTemplatesController, GmailController, EmailCampaignsController],
+  providers: [Database, FiltersService, QueueService, JobsService, RecordsService, UserImportService, EmailTemplatesService, GmailService, EmailCampaignsService]
 })
 export class AppModule {}

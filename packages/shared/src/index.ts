@@ -3,8 +3,27 @@ import { z } from 'zod';
 export const confidenceSchema = z.enum(['confirmed', 'likely', 'unsure']);
 export type Confidence = z.infer<typeof confidenceSchema>;
 
-export const discoveryTypeSchema = z.enum(['source_profile', 'linked_website', 'guessed']);
+export const discoveryTypeSchema = z.enum(['source_profile', 'linked_website', 'guessed', 'imported']);
 export type DiscoveryType = z.infer<typeof discoveryTypeSchema>;
+
+export const MAX_IMPORT_USERS = 1000;
+export const MAX_IMPORT_BYTES = 1_000_000;
+export const importUserSchema = z.object({
+  name: z.string().trim().max(200),
+  email: z.string().trim().max(254).email(),
+  country: z.string().trim().max(120),
+  extra_info: z.string().trim().max(10_000).default(''),
+  fetch_source: z.string().trim().min(1).max(120).default('github_hire_me'),
+  fetch_page_link: z.string().trim().max(2048).pipe(z.union([
+    z.literal(''), z.string().url().regex(/^https?:\/\//i, 'Use an HTTP or HTTPS URL')
+  ])).default('')
+});
+export const importUsersSchema = z.preprocess(
+  (value) => Array.isArray(value) ? value : [value],
+  z.array(importUserSchema).min(1).max(MAX_IMPORT_USERS)
+);
+export type ImportUser = z.infer<typeof importUserSchema>;
+export interface ImportUsersResult { total: number; created: number; updated: number; skipped: number }
 
 const optionalInteger = z.coerce.number().int().nonnegative().optional();
 const optionalDate = z.string().date().optional();
