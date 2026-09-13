@@ -29,13 +29,18 @@ export function JobDetail() {
     stream.addEventListener('job', (event) => client.setQueryData(['job', id], JSON.parse((event as MessageEvent).data)));
     return () => stream.close();
   }, [client, id]);
-  const action = useMutation({ mutationFn: (name: string) => api<Job>(`/jobs/${id}/${name}`, { method: 'POST' }), onSuccess: (job) => client.setQueryData(['job', id], job) });
+  const action = useMutation({ mutationFn: (name: string) => api<Job>(`/jobs/${id}/${name}`, { method: 'POST' }), onSuccess: (job) => {
+    client.setQueryData(['job', id], job);
+    void client.invalidateQueries({ queryKey: ['jobs'] });
+    void client.invalidateQueries({ queryKey: ['filters'] });
+  } });
   if (query.isLoading) return <Loading />;
   if (query.error) return <ErrorBox error={query.error} />;
   const job = query.data!; const c = job.counters_json;
-  const controls = <div className="actions">{job.status === 'paused' ? <button className="button" onClick={() => action.mutate('resume')}><Play size={15} />Resume</button>
-    : ['running','queued','rate_limited'].includes(job.status) && <button className="button" onClick={() => action.mutate('pause')}><Pause size={15} />Pause</button>}
-    {['running','queued','paused','rate_limited'].includes(job.status) && <button className="button danger" onClick={() => action.mutate('cancel')}><Square size={14} />Cancel</button>}
+  const controls = <div className="actions">{job.status === 'failed' && <button className="button primary" disabled={action.isPending} onClick={() => action.mutate('continue')}><Play size={15} />{action.isPending ? 'Continuing…' : 'Continue'}</button>}
+    {job.status === 'paused' ? <button className="button" disabled={action.isPending} onClick={() => action.mutate('resume')}><Play size={15} />Resume</button>
+    : ['running','queued','rate_limited'].includes(job.status) && <button className="button" disabled={action.isPending} onClick={() => action.mutate('pause')}><Pause size={15} />Pause</button>}
+    {['running','queued','paused','rate_limited'].includes(job.status) && <button className="button danger" disabled={action.isPending} onClick={() => action.mutate('cancel')}><Square size={14} />Cancel</button>}
     {job.saved_filter_id && <Link className="button" to="/filters"><ListFilter size={14} />Filter</Link>}
     {['completed','completed_with_errors','failed','cancelled'].includes(job.status) && <Link className="button" to={`/users?jobId=${job.id}`}><Users size={14} />Results</Link>}</div>;
   const metrics = [
@@ -45,6 +50,7 @@ export function JobDetail() {
     ['Skipped', c.skipped], ['Requests', c.requests], ['Retries', c.retries], ['Errors', c.errors]
   ];
   return <><PageHeader eyebrow="Job" title={job.name || `GitHub · ${job.id.slice(0, 8)}`} description={`Created ${new Date(job.created_at).toLocaleString()}`} action={controls} />
+    {action.error && <ErrorBox error={action.error} />}
     <div className="job-hero panel"><div><StatusBadge status={job.status} /><h2>{job.phase.replaceAll('_', ' ')}</h2><p>{job.failure_message || `Checkpoint: ${String(job.checkpoint_json.lastLogin ?? 'waiting')}`}</p></div>
       <div className="pulse-dot" /></div>
     <section className="metric-grid">{metrics.map(([name, value]) => <div className="metric" key={name}><span>{name}</span><strong>{Number(value ?? 0).toLocaleString()}</strong></div>)}</section>

@@ -24,6 +24,8 @@ Run infrastructure with `docker compose up -d postgres redis`, install dependenc
 
 The database schema is initialized from `infra/postgres/init.sql` when the PostgreSQL volume is first created.
 
+Failed collection jobs have a **Continue** button on their job details page (`POST /api/jobs/:id/continue`). It requeues the same job, keeps its saved results and history, and resumes after the last completed profile. Discovery replays search pages to locate the checkpoint; profiles before it are not inspected again, including profiles skipped by filters. The interrupted profile is retried. New checkpoints use the GitHub account ID so a username change does not prevent continuation; older jobs use their saved username. If the checkpoint is no longer in the search results, the job reports that explicitly and the saved filter can be run as a new job. Previous errors stay in the counters and event history, so a successful continuation can finish as **completed with errors**.
+
 ## Import users from JSON
 
 Open **Users → Import JSON**, upload a `.json` file or paste JSON, then click **Import users**. The API also accepts the same JSON at `POST /api/users/import` with `Content-Type: application/json`.

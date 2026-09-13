@@ -7,7 +7,8 @@ import { type EmailObservation, PersistenceService } from './persistence.js';
 import { guessEmails, inspectLinkedWebsite } from './website.js';
 import { SourceAdapterRegistry } from './source-adapter.js';
 
-type JobRow = { id: string; status: string; filters_json: CollectionFilters; counters_json: JobCounters };
+type Checkpoint = { lastLogin?: string; lastId?: number; counters?: JobCounters };
+type JobRow = { id: string; status: string; filters_json: CollectionFilters; counters_json: JobCounters; checkpoint_json?: Checkpoint };
 
 const confidenceRank: Record<Confidence, number> = { unsure: 1, likely: 2, confirmed: 3 };
 
@@ -28,6 +29,7 @@ function matchesPostFilters(profile: GitHubProfile, activity: string | null, fil
 export class Collector {
   private readonly persistence: PersistenceService;
   private counters: JobCounters = emptyJobCounters();
+  private completedCounters: JobCounters = emptyJobCounters();
   private jobId = '';
   private readonly github: GitHubAdapter;
 
@@ -55,35 +57,54 @@ export class Collector {
     this.jobId = jobId;
     const job = await this.loadJob();
     this.counters = { ...emptyJobCounters(), ...(job.counters_json ?? {}) };
-    if (['completed', 'cancelled'].includes(job.status)) return;
+    if (['completed', 'completed_with_errors', 'cancelled'].includes(job.status)) return;
     if (job.status === 'cancelling') {
       await this.finishCancelled();
       return;
     }
+    const checkpoint = job.checkpoint_json ?? {};
+    if (checkpoint.counters) this.restoreProgress(checkpoint.counters);
+    this.completedCounters = { ...this.counters };
+    let seekingCheckpoint = Boolean(checkpoint.lastId || checkpoint.lastLogin);
+    let replayed = 0;
     await this.updateJob('running', 'discovering', { started_at: 'COALESCE(started_at, now())' });
     await this.event('info', 'job_started', 'Job started');
     try {
       for await (const candidate of this.github.discover(job.filters_json)) {
         const state = await this.waitForRunnableState();
         if (state === 'cancelled') return;
+        if (seekingCheckpoint) {
+          replayed += 1;
+          if (checkpoint.lastId ? candidate.id === checkpoint.lastId : candidate.login.toLowerCase() === checkpoint.lastLogin!.toLowerCase()) {
+            seekingCheckpoint = false;
+            // Older checkpoints did not store counters and may include a failed candidate.
+            if (!checkpoint.counters) {
+              this.counters.candidatesDiscovered = replayed;
+              this.counters.usersInspected = Math.min(this.counters.usersInspected, replayed);
+              this.completedCounters = { ...this.counters };
+            }
+          }
+          continue;
+        }
+        if (this.counters.usersInspected >= job.filters_json.maxUsers) break;
         if (await this.persistence.processedInJob(jobId, String(candidate.id))) continue;
         this.counters.candidatesDiscovered += 1;
         const existing = await this.persistence.existingAccount(String(candidate.id));
         if (existing && job.filters_json.excludePreviouslyProcessed) {
           this.counters.skipped += 1;
           await this.persistence.recordSkipped(jobId, existing, 'skipped_previously_processed');
-          await this.checkpoint(candidate.login);
+          await this.checkpoint(candidate.login, candidate.id);
           continue;
         }
         if (existing && Date.now() - new Date(existing.last_checked_at).getTime() < 7 * 86_400_000) {
           this.counters.skipped += 1;
           await this.persistence.recordSkipped(jobId, existing, 'skipped_fresh');
-          await this.checkpoint(candidate.login);
+          await this.checkpoint(candidate.login, candidate.id);
           continue;
         }
         if (await this.persistence.isSuppressed(String(candidate.id), candidate.login)) {
           this.counters.suppressed += 1;
-          await this.checkpoint(candidate.login);
+          await this.checkpoint(candidate.login, candidate.id);
           continue;
         }
         await this.consumeDaily('github_profiles', 25_000);
@@ -98,20 +119,20 @@ export class Collector {
             login: candidate.login,
             status: error.status
           });
-          await this.checkpoint(candidate.login);
+          await this.checkpoint(candidate.login, candidate.id);
           continue;
         }
         this.counters.usersInspected += 1;
         if (profile.type !== 'User') {
           this.counters.skipped += 1;
-          await this.checkpoint(candidate.login);
+          await this.checkpoint(candidate.login, candidate.id);
           continue;
         }
         const activity = job.filters_json.activityFrom || job.filters_json.activityTo
           ? await this.withRateLimit(() => this.github.lastPublicActivity(candidate.login)) : null;
         if (!matchesPostFilters(profile, activity, job.filters_json)) {
           this.counters.skipped += 1;
-          await this.checkpoint(candidate.login);
+          await this.checkpoint(candidate.login, candidate.id);
           continue;
         }
         const observations: EmailObservation[] = [];
@@ -161,12 +182,12 @@ export class Collector {
         const eligible = observations.filter((item) => confidenceRank[item.confidence]! >= minRank);
         if (job.filters_json.requirePublicEmail && !eligible.some((item) => item.publiclyDeclared)) {
           this.counters.skipped += 1;
-          await this.checkpoint(candidate.login);
+          await this.checkpoint(candidate.login, candidate.id);
           continue;
         }
         if (await this.persistence.isSuppressed(String(candidate.id), candidate.login)) {
           this.counters.suppressed += 1;
-          await this.checkpoint(candidate.login);
+          await this.checkpoint(candidate.login, candidate.id);
           continue;
         }
         const result = await this.persistence.persist(jobId, profile, activity, eligible, websiteCheckedAt);
@@ -179,9 +200,10 @@ export class Collector {
           if (item.confidence === 'unsure') this.counters.unsureEmails += 1;
           if (item.discoveryType === 'guessed') this.counters.guessedEmails += 1;
         }
-        await this.checkpoint(candidate.login);
+        await this.checkpoint(candidate.login, candidate.id);
         if (this.counters.usersInspected >= job.filters_json.maxUsers) break;
       }
+      if (seekingCheckpoint) throw new Error('Saved checkpoint was not found in the current GitHub search results. Run the saved filter as a new job.');
       const finalStatus = this.counters.errors > 0 ? 'completed_with_errors' : 'completed';
       await this.db.query(
         `UPDATE collection_jobs SET status = $2, phase = 'finished', counters_json = $3::jsonb,
@@ -191,6 +213,7 @@ export class Collector {
       await this.event('info', 'job_completed', `Job ${finalStatus.replaceAll('_', ' ')}`, this.counters);
     } catch (error) {
       if (error instanceof JobCancelledError) return;
+      this.restoreProgress(this.completedCounters);
       this.counters.errors += 1;
       await this.db.query(
         `UPDATE collection_jobs SET status = 'failed', phase = 'failed', counters_json = $2::jsonb,
@@ -203,7 +226,7 @@ export class Collector {
   }
 
   private async loadJob(): Promise<JobRow> {
-    const result = await this.db.query<JobRow>(`SELECT id, status, filters_json, counters_json FROM collection_jobs WHERE id = $1`, [this.jobId]);
+    const result = await this.db.query<JobRow>(`SELECT id, status, filters_json, counters_json, checkpoint_json FROM collection_jobs WHERE id = $1`, [this.jobId]);
     if (!result.rows[0]) throw new Error('Job not found');
     return result.rows[0];
   }
@@ -266,12 +289,19 @@ export class Collector {
     await this.event('info', 'job_cancelled', 'Job cancelled');
   }
 
-  private async checkpoint(login: string) {
+  private restoreProgress(counters: JobCounters) {
+    const { requests, retries, errors } = this.counters;
+    this.counters = { ...counters, requests, retries, errors };
+  }
+
+  private async checkpoint(login: string, externalId?: number) {
     await this.db.query(
       `UPDATE collection_jobs SET counters_json = $2::jsonb,
-        checkpoint_json = jsonb_build_object('lastLogin', $3::text, 'processed', $4::integer), updated_at = now() WHERE id = $1`,
-      [this.jobId, JSON.stringify(this.counters), login, this.counters.usersInspected + this.counters.skipped + this.counters.suppressed]
+        checkpoint_json = jsonb_build_object('lastLogin', $3::text, 'processed', $4::integer,
+          'lastId', $5::bigint, 'counters', $2::jsonb), updated_at = now() WHERE id = $1`,
+      [this.jobId, JSON.stringify(this.counters), login, this.counters.candidatesDiscovered, externalId ?? null]
     );
+    this.completedCounters = { ...this.counters };
   }
 
   private saveCounters() {

@@ -68,6 +68,34 @@ export class JobsService {
     return this.get(id);
   }
 
+  async continue(id: string) {
+    const current = await this.get(id) as {
+      status: string; phase: string; completed_at: string | null;
+      failure_code: string | null; failure_message: string | null;
+    };
+    if (current.status !== 'failed') return current;
+    // Only one concurrent Continue request can claim the failed job.
+    const claimed = await this.db.query(
+      `UPDATE collection_jobs SET status = 'queued', phase = 'resuming', completed_at = NULL,
+        failure_code = NULL, failure_message = NULL, updated_at = now()
+       WHERE id = $1 AND status = 'failed' RETURNING id`, [id]
+    );
+    if (!claimed.rows.length) return this.get(id);
+    try {
+      await this.queue.continueCollection(id);
+    } catch (error) {
+      await this.db.query(
+        `UPDATE collection_jobs SET status = 'failed', phase = $2, completed_at = $3,
+          failure_code = $4, failure_message = $5, updated_at = now()
+         WHERE id = $1 AND status = 'queued'`,
+        [id, current.phase, current.completed_at, current.failure_code, current.failure_message]
+      );
+      throw error;
+    }
+    await this.event(id, 'info', 'job_continued', 'Continue requested from saved checkpoint');
+    return this.get(id);
+  }
+
   async event(jobId: string, level: string, type: string, message: string, metadata: unknown = {}) {
     await this.db.query(
       `INSERT INTO job_events (job_id, level, event_type, message, metadata_json) VALUES ($1, $2, $3, $4, $5::jsonb)`,
@@ -103,6 +131,11 @@ export class JobsController {
   @Post(':id/cancel')
   cancel(@Param('id') id: string) {
     return this.jobs.setState(id, 'cancel');
+  }
+
+  @Post(':id/continue')
+  continue(@Param('id') id: string) {
+    return this.jobs.continue(id);
   }
 
   @Sse(':id/stream')

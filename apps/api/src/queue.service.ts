@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { ConflictException, Injectable, OnModuleDestroy } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 
@@ -19,6 +19,16 @@ export class QueueService implements OnModuleDestroy {
       removeOnComplete: 100,
       removeOnFail: 100
     });
+  }
+
+  async continueCollection(jobId: string) {
+    const job = await this.collection.getJob(jobId);
+    // Old failed entries can be removed by BullMQ's retention policy.
+    if (!job) return this.enqueue(jobId);
+    if (await job.getState() !== 'failed') {
+      throw new ConflictException('The worker is still finishing this job. Try Continue again shortly.');
+    }
+    await job.retry('failed');
   }
 
   enqueueEmail(recipientId: string, campaignId: string, delay: number) {
