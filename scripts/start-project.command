@@ -30,7 +30,15 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 print "Building and starting Email Fetch..."
-docker compose up --build --detach || fail "docker compose up failed"
+# Downloads are cached between attempts, so a retry resumes after a slow or dropped connection.
+build_attempt=1
+until docker compose up --build --detach; do
+  (( build_attempt >= 3 )) && fail "docker compose up failed after 3 attempts (check your internet connection)"
+  build_attempt=$((build_attempt + 1))
+  print ""
+  print "Build failed, retrying (attempt $build_attempt of 3)..."
+  sleep 5
+done
 
 print "Waiting for Email Fetch to become ready..."
 attempts=0
